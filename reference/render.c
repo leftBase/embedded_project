@@ -13,6 +13,14 @@ static void clear_screen(void) {
     printf("\033[H");
 }
 
+static void hide_cursor(void) {
+    printf("\033[?25l");
+}
+
+static void show_cursor(void) {
+    printf("\033[?25h");
+}
+
 static const char *item_to_string(ItemType item) {
     switch (item) {
         case ITEM_RED:
@@ -31,13 +39,13 @@ static void make_life_string(int life, char *out, int out_size) {
     int i;
     int pos = 0;
 
+    for (i = 0; i < life && pos < out_size - 4; i++) {
+        pos += snprintf(out + pos, out_size - pos, "[*]");
+    }
+
     if (life <= 0) {
         snprintf(out, out_size, "[ ]");
         return;
-    }
-
-    for (i = 0; i < life && pos < out_size - 4; i++) {
-        pos += snprintf(out + pos, out_size - pos, "[*]");
     }
 
     out[pos] = '\0';
@@ -81,7 +89,7 @@ static void make_border(char *out, const char *title, char fill) {
     }
     inner[PANEL_INNER_WIDTH] = '\0';
 
-    if (title != NULL && title[0] != '\0') {
+    if (title != NULL && strlen(title) > 0) {
         char title_text[64];
         int len;
         int start;
@@ -110,6 +118,25 @@ static void make_content_line(char *out, const char *content) {
     snprintf(out, PANEL_TOTAL_WIDTH + 1, "|%s|", inner);
 }
 
+static void make_left_content_line(char *out, const char *content) {
+    char inner[PANEL_INNER_WIDTH + 1];
+    int len = (int)strlen(content);
+    int i;
+
+    memset(inner, ' ', PANEL_INNER_WIDTH);
+    inner[PANEL_INNER_WIDTH] = '\0';
+
+    if (len > PANEL_INNER_WIDTH) {
+        len = PANEL_INNER_WIDTH;
+    }
+
+    for (i = 0; i < len; i++) {
+        inner[i] = content[i];
+    }
+
+    snprintf(out, PANEL_TOTAL_WIDTH + 1, "|%s|", inner);
+}
+
 static void put_text(char *line, int x, const char *text) {
     int i;
     int len = (int)strlen(text);
@@ -132,8 +159,8 @@ static void put_centered(char *line, int center, const char *text) {
     put_text(line, x, text);
 }
 
-static int rock_art_for_row(int rock_y, int row, char *out, int out_size) {
-    int rel = row - rock_y;
+static int obstacle_art_for_row(int obs_y, int row, char *out, int out_size) {
+    int rel = row - obs_y;
 
     if (rel == -1) {
         snprintf(out, out_size, "+---+");
@@ -153,10 +180,11 @@ static int rock_art_for_row(int rock_y, int row, char *out, int out_size) {
     return 0;
 }
 
-static void make_road_line(const GameState *game, int player_index, int row, char *out) {
+static void make_road_line(const Game *game, int player_index, int row, char *out) {
     char inner[PANEL_INNER_WIDTH + 1];
-    char art[16];
     int i;
+    int lane;
+    char art[16];
     const Player *player = &game->players[player_index];
 
     memset(inner, ' ', PANEL_INNER_WIDTH);
@@ -165,16 +193,18 @@ static void make_road_line(const GameState *game, int player_index, int row, cha
     inner[18] = '|';
     inner[37] = '|';
 
-    for (i = 0; i < MAX_ROCKS; i++) {
-        const Rock *rock = &game->rocks[player_index][i];
+    for (i = 0; i < MAX_OBSTACLES; i++) {
+        const Obstacle *obs = &game->obstacles[player_index][i];
 
-        if (!rock->active) {
+        if (!obs->active) {
             continue;
         }
 
-        if (rock_art_for_row(rock->y, row, art, sizeof(art))) {
-            if (rock->lane >= 0 && rock->lane < LANE_COUNT) {
-                put_centered(inner, lane_center[rock->lane], art);
+        if (obstacle_art_for_row(obs->y, row, art, sizeof(art))) {
+            lane = obs->lane;
+
+            if (lane >= 0 && lane < LANE_COUNT) {
+                put_centered(inner, lane_center[lane], art);
             }
         }
     }
@@ -193,11 +223,11 @@ static void make_road_line(const GameState *game, int player_index, int row, cha
     snprintf(out, PANEL_TOTAL_WIDTH + 1, "|%s|", inner);
 }
 
-static void build_player_panel(const GameState *game, int player_index, char lines[PANEL_LINES][PANEL_TOTAL_WIDTH + 1]) {
+static void build_player_panel(const Game *game, int player_index, char lines[PANEL_LINES][PANEL_TOTAL_WIDTH + 1]) {
     char title[32];
     char status[128];
     char life[32];
-    char item[96];
+    char item[64];
     int idx = 0;
     int r;
     const Player *player = &game->players[player_index];
@@ -209,12 +239,10 @@ static void build_player_panel(const GameState *game, int player_index, char lin
     snprintf(status, sizeof(status), "LIFE:%s   SCORE:%05d", life, player->score);
     make_content_line(lines[idx++], status);
 
-    if (player->item == ITEM_GREEN) {
-        snprintf(item, sizeof(item), "ITEM:%s  STACK:%d  TIME:%d",
-                 item_to_string(player->item), player->green_stack, player->item_timer);
+    if (player->mash_active) {
+        snprintf(item, sizeof(item), "ITEM:%s  MASH:%d/%d", item_to_string(player->mash_item), player->mash_count, ITEM_MASH_LIMIT);
     } else {
-        snprintf(item, sizeof(item), "ITEM:%s  TIME:%d",
-                 item_to_string(player->item), player->item_timer);
+        snprintf(item, sizeof(item), "ITEM:%s", item_to_string(player->item));
     }
     make_content_line(lines[idx++], item);
 
@@ -245,41 +273,41 @@ static void build_message_panel(const char *title, const char *message, char lin
     make_border(lines[PANEL_LINES - 1], NULL, '=');
 }
 
-static void build_game_over_panels(const GameState *game, char left[PANEL_LINES][PANEL_TOTAL_WIDTH + 1], char right[PANEL_LINES][PANEL_TOTAL_WIDTH + 1]) {
-    char message[64];
+static void build_game_over_panels(const Game *game, char left[PANEL_LINES][PANEL_TOTAL_WIDTH + 1], char right[PANEL_LINES][PANEL_TOTAL_WIDTH + 1]) {
+    char msg[64];
 
     if (game->winner == PLAYER_1) {
-        snprintf(message, sizeof(message), "PLAYER 1 WIN!");
+        snprintf(msg, sizeof(msg), "PLAYER 1 WIN!");
     } else if (game->winner == PLAYER_2) {
-        snprintf(message, sizeof(message), "PLAYER 2 WIN!");
+        snprintf(msg, sizeof(msg), "PLAYER 2 WIN!");
     } else {
-        snprintf(message, sizeof(message), "DRAW!");
+        snprintf(msg, sizeof(msg), "DRAW!");
     }
 
-    build_message_panel("GAME OVER", message, left);
+    build_message_panel("GAME OVER", msg, left);
     build_message_panel("GAME OVER", "PRESS START TO RESTART", right);
 }
 
-int render_init(void) {
-    printf("\033[2J\033[?25l");
+void render_init(void) {
+    printf("\033[2J");
+    hide_cursor();
     fflush(stdout);
-    return 0;
 }
 
-void render_game(const GameState *game) {
+void render_draw(const Game *game) {
     char left[PANEL_LINES][PANEL_TOTAL_WIDTH + 1];
     char right[PANEL_LINES][PANEL_TOTAL_WIDTH + 1];
     int i;
 
     clear_screen();
 
-    if (game->state == GAME_READY) {
+    if (game->state == STATE_READY) {
         build_message_panel("READY", "PRESS START", left);
-        build_message_panel("CONTROLS", "Q6+M4 BUTTONS READY", right);
-    } else if (game->state == GAME_PAUSED) {
+        build_message_panel("CONTROLS", "A/D Q | S | J/L O", right);
+    } else if (game->state == STATE_PAUSED) {
         build_message_panel("PLAYER 1", "PAUSED", left);
         build_message_panel("PLAYER 2", "PAUSED", right);
-    } else if (game->state == GAME_OVER) {
+    } else if (game->state == STATE_GAME_OVER) {
         build_game_over_panels(game, left, right);
     } else {
         build_player_panel(game, PLAYER_1, left);
@@ -291,13 +319,12 @@ void render_game(const GameState *game) {
     }
 
     printf("\n");
-    printf("tick:%d lcd:%d spawn:%d%% rock_move:%d\n",
-           game->tick_count, game->lcd, game->spawn_chance, game->rock_move_ticks);
-    printf("keys: a/d/q = P1, s = start, p = pause, j/l/o = P2, x = quit\n");
+    printf("Controls: a/d=1P move, q=1P func, s=start, p=pause, j/l=2P move, o=2P func, x=quit\n");
     fflush(stdout);
 }
 
-void render_shutdown(void) {
-    printf("\033[?25h\033[0m\n");
+void render_close(void) {
+    show_cursor();
+    printf("\033[0m\n");
     fflush(stdout);
 }
