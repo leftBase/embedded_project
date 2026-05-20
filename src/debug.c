@@ -25,7 +25,7 @@ static const char *event_name(EventType type) {
 
 void debug_init(const char *enabled) {
 #ifdef ENABLE_DEBUG_LOG
-    if (enabled == NULL || enabled[0] == '\0' || enabled[0] == '0') {
+    if (enabled != NULL && enabled[0] == '0') {
         return;
     }
 

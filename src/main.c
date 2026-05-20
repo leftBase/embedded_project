@@ -29,17 +29,22 @@ static void keyboard_init(void) {
     struct termios raw;
 
     if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
+        DBG("tcgetattr failed errno=%d", errno);
         return;
     }
 
     raw = original_termios;
+    raw.c_iflag &= ~(ICRNL | IXON);
     raw.c_lflag &= ~(ICANON | ECHO);
     raw.c_cc[VMIN] = 0;
     raw.c_cc[VTIME] = 0;
 
     if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+        DBG("tcsetattr failed errno=%d", errno);
         return;
     }
+
+    tcflush(STDIN_FILENO, TCIFLUSH);
 
     original_stdin_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     if (original_stdin_flags >= 0) {
@@ -113,6 +118,7 @@ static void* keyboard_thread(void* arg) {
                 queue_push(&g_queue, EV_P2_SKILL, 1);
                 break;
             case 'x':
+            case 'X':
                 queue_push(&g_queue, EV_QUIT, 1);
                 break;
             default:

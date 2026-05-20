@@ -1,5 +1,17 @@
 #include "event.h"
 
+static int queue_next_index(int index) {
+    return (index + 1) % QUEUE_SIZE;
+}
+
+static int queue_is_full(const EventQueue *q) {
+    return queue_next_index(q->tail) == q->head;
+}
+
+static int event_is_control(EventType type) {
+    return type != EV_TICK && type != EV_NONE;
+}
+
 void queue_init(EventQueue *q) {
     q->head = 0; 
     q->tail = 0;
@@ -10,10 +22,20 @@ void queue_init(EventQueue *q) {
 void queue_push_event(EventQueue *q, GameEvent event) {
     pthread_mutex_lock(&q->lock); // 자물쇠 채움 (다른 스레드 접근 금지)
     
-    int next = (q->tail + 1) % QUEUE_SIZE;
-    if (next != q->head) { // 큐가 꽉 차지 않았다면
+    if (queue_is_full(q)) {
+        if (event.type == EV_TICK) {
+            pthread_mutex_unlock(&q->lock);
+            return;
+        }
+
+        if (event_is_control(event.type)) {
+            q->head = queue_next_index(q->head);
+        }
+    }
+
+    if (!queue_is_full(q)) {
         q->buffer[q->tail] = event;
-        q->tail = next;
+        q->tail = queue_next_index(q->tail);
         
         // 메인스레드 깨움
         pthread_cond_signal(&q->not_empty); 
@@ -42,7 +64,7 @@ GameEvent queue_pop(EventQueue *q) {
     }
     
     GameEvent ev = q->buffer[q->head];
-    q->head = (q->head + 1) % QUEUE_SIZE;
+    q->head = queue_next_index(q->head);
     
     pthread_mutex_unlock(&q->lock);
     return ev;
