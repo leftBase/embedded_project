@@ -15,5 +15,8 @@ void serial_close(void);
 ssize_t serial_read(void *buf, size_t len);
 ssize_t serial_write(const void *buf, size_t len);
 int serial_next_event(GameEvent *event);
+int serial_send_lcd(int preset);
+int serial_send_fnd_digit(int position, int value);
+int serial_send_fnd_number(int number);
 
 #endif // SERIAL_H

@@ -12,6 +12,8 @@
 #define PACKET_START 0x12
 #define PACKET_END 0x13
 #define CMD_M4_BUTTON 0x22
+#define CMD_FND_SET 0x23
+#define CMD_LCD_SET 0x24
 
 #define Q6_KEY_BACK 158
 #define Q6_KEY_HOME 172
@@ -226,6 +228,77 @@ ssize_t serial_write(const void *buf, size_t len) {
     }
 
     return write(m4_uart_fd, buf, len);
+}
+
+static int write_packet(unsigned char command, unsigned char arg1, unsigned char arg2) {
+    unsigned char packet[5];
+    ssize_t n;
+
+    packet[0] = PACKET_START;
+    packet[1] = command;
+    packet[2] = arg1;
+    packet[3] = arg2;
+    packet[4] = PACKET_END;
+
+    n = serial_write(packet, sizeof(packet));
+    return n == (ssize_t)sizeof(packet) ? 0 : -1;
+}
+
+int serial_send_lcd(int preset) {
+    if (preset < 0) {
+        preset = 0;
+    }
+
+    if (preset > 3) {
+        preset = 3;
+    }
+
+    return write_packet(CMD_LCD_SET, '0', (unsigned char)('0' + preset));
+}
+
+int serial_send_fnd_digit(int position, int value) {
+    if (position < 0) {
+        position = 0;
+    }
+
+    if (position > 2) {
+        position = 2;
+    }
+
+    if (value < 0) {
+        value = 0;
+    }
+
+    if (value > 9) {
+        value = 9;
+    }
+
+    return write_packet(CMD_FND_SET, (unsigned char)('0' + position), (unsigned char)('0' + value));
+}
+
+int serial_send_fnd_number(int number) {
+    int hundreds;
+    int tens;
+    int ones;
+
+    if (number < 0) {
+        number = 0;
+    }
+
+    number %= 1000;
+    hundreds = number / 100;
+    tens = (number / 10) % 10;
+    ones = number % 10;
+
+    if (serial_send_fnd_digit(0, hundreds) != 0) {
+        return -1;
+    }
+
+    if (serial_send_fnd_digit(1, tens) != 0) {
+        return -1;
+    }
+
+    return serial_send_fnd_digit(2, ones);
 }
 
 int serial_next_event(GameEvent *event) {

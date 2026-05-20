@@ -18,7 +18,8 @@ static EventQueue g_queue;
 static GameState g_game;
 static volatile int running = 1;
 
-#define RENDER_INTERVAL_TICKS 5
+#define RENDER_INTERVAL_TICKS 10
+#define FND_INTERVAL_TICKS 10
 
 static struct termios original_termios;
 static int original_stdin_flags = -1;
@@ -141,12 +142,46 @@ static void* serial_thread(void* arg) {
     return NULL;
 }
 
+static void update_board_outputs(int serial_enabled, const GameState *game) {
+    static int last_lcd = -1;
+    static int fnd_ticks;
+    static int fnd_player;
+
+    if (!serial_enabled) {
+        return;
+    }
+
+    if (game->lcd != last_lcd) {
+        if (serial_send_lcd(game->lcd) == 0) {
+            last_lcd = game->lcd;
+        } else {
+            DBG("lcd send failed lcd=%d errno=%d", game->lcd, errno);
+        }
+    }
+
+    fnd_ticks++;
+    if (fnd_ticks < FND_INTERVAL_TICKS) {
+        return;
+    }
+
+    fnd_ticks = 0;
+    fnd_player = 1 - fnd_player;
+
+    if (serial_send_fnd_number(game->players[fnd_player].score) != 0) {
+        DBG("fnd send failed p=%d score=%d errno=%d",
+            fnd_player + 1,
+            game->players[fnd_player].score,
+            errno);
+    }
+}
+
 int main(int argc, char **argv) {
     pthread_t timer;
     pthread_t keyboard;
     pthread_t serial;
     int serial_enabled;
     int render_tick_count = 0;
+    int need_render = 1;
     int use_serial = argc > 1 && strcmp(argv[1], "--serial") == 0;
 
     srand((unsigned int)time(NULL));
@@ -184,13 +219,17 @@ int main(int argc, char **argv) {
         game_apply_event(&g_game, ev);
 
         if (ev.type == EV_TICK) {
+            update_board_outputs(serial_enabled, &g_game);
             render_tick_count++;
             if (render_tick_count >= RENDER_INTERVAL_TICKS) {
                 render_tick_count = 0;
-                render_game(&g_game);
+                if (need_render || g_game.state == GAME_RUNNING) {
+                    render_game(&g_game);
+                    need_render = 0;
+                }
             }
         } else {
-            render_game(&g_game);
+            need_render = 1;
         }
     }
 
