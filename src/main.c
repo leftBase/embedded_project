@@ -1,11 +1,16 @@
 #include "event.h"
+#include "debug.h"
 #include "game.h"
 #include "render.h"
 #include "serial.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -13,7 +18,47 @@ static EventQueue g_queue;
 static GameState g_game;
 static volatile int running = 1;
 
-#define RENDER_INTERVAL_TICKS 4
+#define RENDER_INTERVAL_TICKS 5
+
+static struct termios original_termios;
+static int original_stdin_flags = -1;
+static int keyboard_ready;
+
+static void keyboard_init(void) {
+    struct termios raw;
+
+    if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
+        return;
+    }
+
+    raw = original_termios;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
+        return;
+    }
+
+    original_stdin_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+    if (original_stdin_flags >= 0) {
+        fcntl(STDIN_FILENO, F_SETFL, original_stdin_flags | O_NONBLOCK);
+    }
+
+    keyboard_ready = 1;
+}
+
+static void keyboard_close(void) {
+    if (!keyboard_ready) {
+        return;
+    }
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);
+
+    if (original_stdin_flags >= 0) {
+        fcntl(STDIN_FILENO, F_SETFL, original_stdin_flags);
+    }
+}
 
 static void* timer_thread(void* arg) {
     (void)arg;
@@ -30,7 +75,16 @@ static void* keyboard_thread(void* arg) {
     (void)arg;
 
     while (running) {
-        int c = getchar();
+        unsigned char c;
+        ssize_t n = read(STDIN_FILENO, &c, 1);
+
+        if (n <= 0) {
+            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+                DBG("keyboard read error errno=%d", errno);
+            }
+            usleep(5000);
+            continue;
+        }
 
         switch (c) {
             case 'a':
@@ -76,32 +130,43 @@ static void* serial_thread(void* arg) {
         int result = serial_next_event(&event);
 
         if (result > 0) {
+            debug_log_event("serial_event", event);
             queue_push_event(&g_queue, event);
+        } else if (result < 0) {
+            DBG("serial_next_event failed errno=%d", errno);
+            usleep(20000);
         }
     }
 
     return NULL;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     pthread_t timer;
     pthread_t keyboard;
     pthread_t serial;
     int serial_enabled;
     int render_tick_count = 0;
+    int use_serial = argc > 1 && strcmp(argv[1], "--serial") == 0;
 
     srand((unsigned int)time(NULL));
+    debug_init(getenv("GAME_DEBUG"));
+    DBG("program start use_serial=%d", use_serial);
 
     queue_init(&g_queue);
     game_init(&g_game);
+    keyboard_init();
     render_init();
 
     pthread_create(&timer, NULL, timer_thread, NULL);
     pthread_create(&keyboard, NULL, keyboard_thread, NULL);
 
-    serial_enabled = serial_init(NULL, 115200) == 0;
+    serial_enabled = use_serial && serial_init(NULL, 115200) == 0;
     if (serial_enabled) {
         pthread_create(&serial, NULL, serial_thread, NULL);
+        DBG("serial thread enabled");
+    } else if (use_serial) {
+        DBG("serial init failed errno=%d", errno);
     }
 
     while (running) {
@@ -110,6 +175,10 @@ int main(void) {
         if (ev.type == EV_QUIT) {
             running = 0;
             break;
+        }
+
+        if (ev.type != EV_TICK) {
+            debug_log_event("main_event", ev);
         }
 
         game_apply_event(&g_game, ev);
@@ -125,8 +194,11 @@ int main(void) {
         }
     }
 
+    save_game_log(g_game.logs);
     serial_close();
     render_shutdown();
+    keyboard_close();
+    debug_close();
 
     return 0;
 }

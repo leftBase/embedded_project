@@ -12,7 +12,7 @@
 #define MAX_LIFE 5
 
 #define MAX_ROCKS 40
-#define ROAD_HEIGHT 14
+#define ROAD_HEIGHT 16
 
 #define TICK_MS 50
 #define ROCK_MOVE_TICKS 8
@@ -83,6 +83,7 @@ typedef struct {
     int rock_spawn_ticks;
     int spawn_chance;
     int winner;
+    int log_count;
 } GameState;
 
 void game_init(GameState *game);

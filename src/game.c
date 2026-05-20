@@ -1,5 +1,7 @@
 #include "game.h"
+#include "debug.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -29,6 +31,15 @@ static void reset_player(Player *player) {
     player->item = ITEM_NONE;
     player->item_timer = 0;
     player->green_stack = 0;
+}
+
+static void add_game_log(GameState *game, const char *event, int value) {
+    int index = game->log_count % 100;
+
+    game->logs[index].timestamp = game->tick_count;
+    game->logs[index].event = event;
+    game->logs[index].value = value;
+    game->log_count++;
 }
 
 static void clear_rocks(GameState *game, int player_index) {
@@ -141,6 +152,8 @@ static void update_item_timers(GameState *game) {
                     player->life++;
                 }
                 player->score += SCORE_ITEM_SUCCESS;
+                add_game_log(game, "green_heal", p);
+                DBG("green heal p=%d life=%d stack=%d", p + 1, player->life, player->green_stack);
             }
 
             player->item = ITEM_NONE;
@@ -175,6 +188,8 @@ static void spawn_item_if_needed(GameState *game) {
     game->players[PLAYER_2].green_stack = 0;
 
     refresh_lcd(game);
+    add_game_log(game, "item_spawn", item);
+    DBG("item spawn item=%d timer=%d", item, timer);
 }
 
 static void spawn_rocks_if_needed(GameState *game) {
@@ -248,11 +263,16 @@ static void check_game_over(GameState *game) {
     } else {
         game->winner = PLAYER_2;
     }
+
+    add_game_log(game, "game_over", game->winner);
+    DBG("game over winner=%d", game->winner);
 }
 
 static void game_start(GameState *game) {
     game_init(game);
     game->state = GAME_RUNNING;
+    add_game_log(game, "start", 0);
+    DBG("game start");
 }
 
 void game_init(GameState *game) {
@@ -267,6 +287,7 @@ void game_init(GameState *game) {
     game->rock_move_ticks = ROCK_MOVE_TICKS;
     game->rock_spawn_ticks = ROCK_SPAWN_TICKS;
     game->spawn_chance = 25;
+    game->log_count = 0;
 
     reset_player(&game->players[PLAYER_1]);
     reset_player(&game->players[PLAYER_2]);
@@ -310,11 +331,15 @@ void game_use_item(GameState *game, int player_index) {
             player->score += SCORE_ITEM_SUCCESS;
             player->item = ITEM_NONE;
             player->item_timer = 0;
+            add_game_log(game, "red_attack", player_index);
+            DBG("red attack p=%d target=%d", player_index + 1, opponent + 1);
             break;
 
         case ITEM_GREEN:
             player->green_stack++;
             player->fkey = player->green_stack;
+            add_game_log(game, "green_stack", player_index);
+            DBG("green stack p=%d stack=%d", player_index + 1, player->green_stack);
             break;
 
         case ITEM_BLUE:
@@ -322,6 +347,8 @@ void game_use_item(GameState *game, int player_index) {
             player->score += SCORE_ITEM_SUCCESS;
             player->item = ITEM_NONE;
             player->item_timer = 0;
+            add_game_log(game, "blue_clear", player_index);
+            DBG("blue clear p=%d", player_index + 1);
             break;
 
         case ITEM_NONE:
@@ -363,6 +390,9 @@ void game_check_collisions(GameState *game) {
                     player->life = 0;
                     player->alive = 0;
                 }
+
+                add_game_log(game, "crash", p);
+                DBG("crash p=%d lane=%d life=%d score=%d", p + 1, player->lane, player->life, player->score);
             }
         }
     }
@@ -407,12 +437,14 @@ void game_apply_event(GameState *game, GameEvent ev) {
         case EV_P1_LEFT:
             if (game->state == GAME_RUNNING) {
                 game_move_player(game, PLAYER_1, -1);
+                DBG("move p=1 lane=%d", game->players[PLAYER_1].lane);
             }
             break;
 
         case EV_P1_RIGHT:
             if (game->state == GAME_RUNNING) {
                 game_move_player(game, PLAYER_1, 1);
+                DBG("move p=1 lane=%d", game->players[PLAYER_1].lane);
             }
             break;
 
@@ -425,12 +457,14 @@ void game_apply_event(GameState *game, GameEvent ev) {
         case EV_P2_LEFT:
             if (game->state == GAME_RUNNING) {
                 game_move_player(game, PLAYER_2, -1);
+                DBG("move p=2 lane=%d", game->players[PLAYER_2].lane);
             }
             break;
 
         case EV_P2_RIGHT:
             if (game->state == GAME_RUNNING) {
                 game_move_player(game, PLAYER_2, 1);
+                DBG("move p=2 lane=%d", game->players[PLAYER_2].lane);
             }
             break;
 
@@ -448,5 +482,18 @@ void game_apply_event(GameState *game, GameEvent ev) {
 }
 
 void save_game_log(GameLog logs[]) {
-    (void)logs;
+    FILE *fp = fopen("game_events.log", "w");
+    int i;
+
+    if (fp == NULL) {
+        return;
+    }
+
+    for (i = 0; i < 100; i++) {
+        if (logs[i].event != NULL) {
+            fprintf(fp, "%ld,%s,%d\n", logs[i].timestamp, logs[i].event, logs[i].value);
+        }
+    }
+
+    fclose(fp);
 }

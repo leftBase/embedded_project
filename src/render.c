@@ -3,11 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#define PANEL_INNER_WIDTH 56
-#define PANEL_TOTAL_WIDTH 58
+#define PANEL_INNER_WIDTH 34
+#define PANEL_TOTAL_WIDTH 36
 #define PANEL_LINES (ROAD_HEIGHT + 7)
 
-static const int lane_center[LANE_COUNT] = {9, 28, 47};
+static const int lane_center[LANE_COUNT] = {6, 17, 28};
 
 static const char *item_to_string(ItemType item) {
     switch (item) {
@@ -132,17 +132,17 @@ static int rock_art_for_row(int rock_y, int row, char *out, int out_size) {
     int rel = row - rock_y;
 
     if (rel == -1) {
-        snprintf(out, out_size, "+---+");
+        snprintf(out, out_size, "[X]");
         return 1;
     }
 
     if (rel == 0) {
-        snprintf(out, out_size, "|###|");
+        snprintf(out, out_size, "[X]");
         return 1;
     }
 
     if (rel == 1) {
-        snprintf(out, out_size, "+---+");
+        snprintf(out, out_size, "[X]");
         return 1;
     }
 
@@ -158,8 +158,8 @@ static void make_road_line(const GameState *game, int player_index, int row, cha
     memset(inner, ' ', PANEL_INNER_WIDTH);
     inner[PANEL_INNER_WIDTH] = '\0';
 
-    inner[18] = '|';
-    inner[37] = '|';
+    inner[11] = '|';
+    inner[22] = '|';
 
     for (i = 0; i < MAX_ROCKS; i++) {
         const Rock *rock = &game->rocks[player_index][i];
@@ -178,12 +178,12 @@ static void make_road_line(const GameState *game, int player_index, int row, cha
     if (row == ROAD_HEIGHT - 2) {
         char car_top[8];
 
-        snprintf(car_top, sizeof(car_top), "/%c\\", player_index == PLAYER_1 ? 'A' : 'B');
+        snprintf(car_top, sizeof(car_top), " %c ", player_index == PLAYER_1 ? 'A' : 'B');
         put_centered(inner, lane_center[player->lane], car_top);
     }
 
     if (row == ROAD_HEIGHT - 1) {
-        put_centered(inner, lane_center[player->lane], "|___|");
+        put_centered(inner, lane_center[player->lane], "[_]");
     }
 
     snprintf(out, PANEL_TOTAL_WIDTH + 1, "|%s|", inner);
@@ -215,7 +215,7 @@ static void build_player_panel(const GameState *game, int player_index, char lin
     make_content_line(lines[idx++], item);
 
     make_border(lines[idx++], NULL, '-');
-    make_content_line(lines[idx++], "LANE 1          LANE 2          LANE 3");
+    make_content_line(lines[idx++], "LANE 1    LANE 2    LANE 3");
     make_border(lines[idx++], NULL, '-');
 
     for (r = 0; r < ROAD_HEIGHT; r++) {
@@ -289,7 +289,7 @@ void render_game(const GameState *game) {
     printf("\n");
     printf("tick:%d lcd:%d spawn:%d%% rock_move:%d\n",
            game->tick_count, game->lcd, game->spawn_chance, game->rock_move_ticks);
-    printf("keys: a/d/q = P1, s = start, p = pause, j/l/o = P2, x = quit\n");
+    printf("keys: a/d/q=P1 s=start p=pause j/l/o=P2 x=quit\n");
     fflush(stdout);
 }
 
