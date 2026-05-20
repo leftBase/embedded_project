@@ -1,7 +1,7 @@
 CC ?= gcc
 TARGET = racing_game
 
-CFLAGS ?= -Wall -Wextra -std=c99 -Iinclude
+CFLAGS ?= -Wall -Wextra -std=c99 -D_DEFAULT_SOURCE -Iinclude
 LDFLAGS ?= -pthread
 
 SRCS = src/main.c src/game.c src/event.c src/render.c src/serial.c
