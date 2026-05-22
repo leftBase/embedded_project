@@ -255,8 +255,8 @@ ssize_t serial_write(const void *buf, size_t len) {
     return write(m4_uart_fd, buf, len);
 }
 
-//패킷에 씀.
-//패킷과 패킷길이를 위 함수에 호출하며 인자로 넘겨 씀. 패킷이 제대로 길이맞춰 쓰이면 0 반환.
+//패킷만들어서 통신에 씀.
+//커맨드, 인자, 인자 채우면 패킷만듦. 패킷과 패킷길이를 위 함수에 호출하며 인자로 넘겨 씀. 패킷이 제대로 길이맞춰 쓰이면 0 반환.
 static int write_packet(unsigned char command, unsigned char arg1, unsigned char arg2) {
     unsigned char packet[5];
     ssize_t n;
@@ -271,6 +271,7 @@ static int write_packet(unsigned char command, unsigned char arg1, unsigned char
     return n == (ssize_t)sizeof(packet) ? 0 : -1;
 }
 
+//lcd에 프리셋 입력해서 패킷 통신함.
 int serial_send_lcd(int preset) {
     if (preset < 0) {
         preset = 0;
@@ -283,6 +284,7 @@ int serial_send_lcd(int preset) {
     return write_packet(CMD_LCD_SET, '0', (unsigned char)('0' + preset));
 }
 
+//fnd에 자리, 숫자 받아서ㅓ 패킷만들어서 통신함.
 int serial_send_fnd_digit(int position, int value) {
     if (position < 0) {
         position = 0;
@@ -303,6 +305,7 @@ int serial_send_fnd_digit(int position, int value) {
     return write_packet(CMD_FND_SET, (unsigned char)('0' + position), (unsigned char)('0' + value));
 }
 
+// 숫자를 fnd 보내는 형식으로 만듦.
 int serial_send_fnd_number(int number) {
     int hundreds;
     int tens;
@@ -328,6 +331,7 @@ int serial_send_fnd_number(int number) {
     return serial_send_fnd_digit(2, ones);
 }
 
+// 이벤트 큐에서 다음 이벤트를 읽어서 GameEvent 구조체에 저장하는 함수. 이벤트가 없으면 블록됨. 이벤트가 있으면 0 반환, 오류 발생 시 -1 반환.
 int serial_next_event(GameEvent *event) {
     int max_fd;
 
@@ -341,6 +345,8 @@ int serial_next_event(GameEvent *event) {
         return -1;
     }
 
+    // 무한 루프를 돌면서 q6 버튼과 m4 uart에서 이벤트가 발생할 때까지 기다립니다. select 시스템 콜을 사용하여 두 파일 디스크립터를 동시에 감시합니다.
+    //이래야함? 이 함수는 q6 버튼과 m4 uart에서 이벤트가 발생할 때까지 기다리는 역할을 합니다. select 시스템 콜을 사용하여 두 파일 디스크립터를 동시에 감시하며, 이벤트가 발생하면 해당 이벤트를 읽어서 GameEvent 구조체에 저장합니다. 이벤트가 없으면 블록되며, 이벤트가 있으면 0을 반환하고, 오류가 발생하면 -1을 반환합니다.
     for (;;) {
         fd_set read_set;
         int ready;
