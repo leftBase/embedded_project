@@ -3,6 +3,10 @@
 
 #include <pthread.h>
 
+// 이벤트타입, 아이템타입 enum정의하고 value까지 갖는 게임이벤트 구조체 정의.
+// 큐사이즈로 게임이벤트 구조체 배열갖는 이벤트큐 구조체 정의. 
+
+// 초기화, 게임이벤트로 푸시, 타입과 값으로 푸시, 게임이벤트리턴하는 팝.
 typedef enum {
     EV_NONE = 0,
     EV_TICK,
@@ -30,6 +34,7 @@ typedef struct {
     ItemType item_type;
 } GameEvent;
 
+//큐가 좆만한데
 #define QUEUE_SIZE 64
 
 typedef struct {
