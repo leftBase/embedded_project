@@ -2,7 +2,47 @@
 #include "serial.h"
 #include "debug.h"
 
+#include <stdarg.h>
+#include <stdlib.h>
 #include <stdio.h>
+
+static FILE *sim_log_fp;
+
+static FILE *sim_log_open(void) {
+    const char *log_path;
+
+    if (sim_log_fp != NULL) {
+        return sim_log_fp;
+    }
+
+    log_path = getenv("SIM_LOG_PATH");
+    if (log_path == NULL || log_path[0] == '\0') {
+        log_path = "sim_serial.log";
+    }
+
+    sim_log_fp = fopen(log_path, "a");
+    if (sim_log_fp != NULL) {
+        setvbuf(sim_log_fp, NULL, _IOLBF, 0);
+    }
+
+    return sim_log_fp;
+}
+
+static void sim_log_printf(const char *fmt, ...) {
+    FILE *fp = sim_log_open();
+    va_list args;
+
+    if (fp == NULL) {
+        return;
+    }
+
+    va_start(args, fmt);
+    vfprintf(fp, fmt, args);
+    va_end(args);
+
+    fputc('\n', fp);
+    fflush(fp);
+}
 
 int hw_init(void) {
     printf("[SIM] hardware init\n");
@@ -43,14 +83,17 @@ int button_read_event(int *code, int *value) {
 }
 
 int m4_uart_init(void) {
-    printf("[SIM] serial init\n");
-    fflush(stdout);
+    sim_log_printf("[SIM] serial init");
     return 0;
 }
 
 void serial_close(void) {
-    printf("[SIM] serial close\n");
-    fflush(stdout);
+    sim_log_printf("[SIM] serial close");
+
+    if (sim_log_fp != NULL) {
+        fclose(sim_log_fp);
+        sim_log_fp = NULL;
+    }
 }
 
 ssize_t serial_write(const void *buf, size_t len) {
@@ -66,12 +109,18 @@ ssize_t serial_write(const void *buf, size_t len) {
     }
 
     if (verbose) {
-        printf("[SIM] serial write len=%zu", len);
-        for (i = 0; i < len; i++) {
-            printf(" %02X", bytes[i]);
+        FILE *fp = sim_log_open();
+
+        if (fp == NULL) {
+            return (ssize_t)len;
         }
-        printf("\n");
-        fflush(stdout);
+
+        fprintf(fp, "[SIM] serial write len=%zu", len);
+        for (i = 0; i < len; i++) {
+            fprintf(fp, " %02X", bytes[i]);
+        }
+        fputc('\n', fp);
+        fflush(fp);
     }
 
     return (ssize_t)len;
@@ -87,8 +136,7 @@ int serial_send_lcd(int preset) {
 
     if (preset != last_lcd) {
         last_lcd = preset;
-        printf("[SIM] LCD preset=%d\n", preset);
-        fflush(stdout);
+        sim_log_printf("[SIM] LCD preset=%d", preset);
         DBG("sim_lcd=%d", preset);
     }
 
@@ -109,8 +157,7 @@ int serial_send_fnd_number(int number) {
 
     if (number != last_number) {
         last_number = number;
-        printf("[SIM] FND number=%d\n", number);
-        fflush(stdout);
+        sim_log_printf("[SIM] FND number=%d", number);
         DBG("sim_fnd=%d", number);
     }
 
