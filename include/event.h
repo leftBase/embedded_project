@@ -44,11 +44,13 @@ typedef struct {
     pthread_mutex_t lock;      // 큐를 보호하는 자물쇠
     pthread_cond_t not_empty;  // 큐에 데이터가 들어왔음을 알리는 알람
     pthread_cond_t not_full;   // 큐에 빈 공간이 생겼음을 알리는 알람
+    int closed; // 종료신호. queue_close()
 } EventQueue;
 
 void queue_init(EventQueue *q);
 void queue_push_event(EventQueue *q, GameEvent event);
 void queue_push(EventQueue *q, EventType type, int value);
 GameEvent queue_pop(EventQueue *q);
+void queue_close(EventQueue *q);
 
 #endif

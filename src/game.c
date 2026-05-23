@@ -31,8 +31,6 @@ static void reset_player(Player *player) {
     player->score = 0;
     player->fkey = 0;
     player->alive = 1;
-    player->item = ITEM_NONE;
-    player->item_timer = 0;
     player->green_stack = 0;
 }
 
@@ -91,19 +89,9 @@ static int lcd_from_item(ItemType item) {
     }
 }
 
-//lcd 새로고침-지금보니까 p1 p2 아이템은 항상 같게 랜덤한데 고쳐야댄? item은 player에 잇으면 안되게슴
+//lcd 새로고침
 static void refresh_lcd(GameState *game) {
-    if (game->players[PLAYER_1].item != ITEM_NONE) {
-        game->lcd = lcd_from_item(game->players[PLAYER_1].item);
-        return;
-    }
-
-    if (game->players[PLAYER_2].item != ITEM_NONE) {
-        game->lcd = lcd_from_item(game->players[PLAYER_2].item);
-        return;
-    }
-
-    game->lcd = LCD_LOGO;
+    game->lcd = lcd_from_item(game->item);
 }
 
 //호출되는 돌생성. 게임스테이트. 플레이어인덱스, 레인 받음.
@@ -146,63 +134,53 @@ static void update_difficulty(GameState *game) {
     }
 }
 
-//플레이어를 포문으로 돌필요가있나 플레이어마다 아이템 타이머가 0이고 아이템이그린이고 미리정한 스택 역치보다 스택이 높으면 맥스라이프 넘지 않게 life++
+//플레이어마다 아이템 타이머가 0이고 아이템이그린이고 미리정한 스택 역치보다 스택이 높으면 맥스라이프 넘지 않게 life++
 //아이템 타이머는 아이템 활성화 시간동안 1씩 감소. 아이템 타이머가 0이되면 아이템 효과 종료. 그린 아이템은 타이머가 0이 될 때 체력 회복 판정. 회복 성공하면 점수 보상.
-//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 static void update_item_timers(GameState *game) {
-    int p;
-
-    for (p = 0; p < PLAYER_COUNT; p++) {
-        Player *player = &game->players[p];
-
-        if (player->item == ITEM_NONE || player->item_timer <= 0) {
-            continue;
-        }
-
-        player->item_timer--;
-
-        if (player->item_timer == 0) {
-            if (player->item == ITEM_GREEN && player->green_stack >= GREEN_HEAL_STACK) {
-                if (player->life < MAX_LIFE) {
-                    player->life++;
-                }
-                player->score += SCORE_ITEM_SUCCESS;
-                add_game_log(game, "green_heal", p);
-                DBG("green heal p=%d life=%d stack=%d", p + 1, player->life, player->green_stack);
-            }
-
-            player->item = ITEM_NONE;
-            player->green_stack = 0;
-        }
+    if (game->item == ITEM_NONE || game->item_timer <= 0) {
+        return;
     }
 
-    refresh_lcd(game);
+    game->item_timer--;
+
+    if (game->item_timer == 0) {
+        if (game->item == ITEM_GREEN) {
+            int p;
+            for (p = 0; p < PLAYER_COUNT; p++) {
+                if (game->players[p].green_stack >= GREEN_HEAL_STACK) {
+                    if (game->players[p].life < MAX_LIFE) {
+                        game->players[p].life++;
+                    }
+                    game->players[p].score += SCORE_ITEM_SUCCESS;
+                    add_game_log(game, "green_heal", p);
+                    DBG("green heal p=%d life=%d stack=%d", p + 1, game->players[p].life, game->players[p].green_stack);
+                }
+                /* 끝나면 스택 초기화 */
+                game->players[p].green_stack = 0;
+            }
+        }
+        /* 아이템 효과 끝나면 공유 상태 클리어 */
+        game->item = ITEM_NONE;
+        game->item_timer = 0;
+        refresh_lcd(game);
+    }
 }
 
 //스텝틱이 아이템 스폰 틱 채우면 아이템 스폰. 아이템은 레드, 그린, 블루 중 랜덤. 아이템이 이미 있으면 안나오게. 아이템 효과 시간은 미리정한 시간으로 고정. 아이템 스폰하면 lcd 새로고침하고 로그에도 남김.
-//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 static void spawn_item_if_needed(GameState *game) {
-    ItemType item;
-    int timer;
-
     if (game->tick_count == 0 || game->tick_count % ITEM_SPAWN_TICKS != 0) {
         return;
     }
 
-    if (game->players[PLAYER_1].item != ITEM_NONE || game->players[PLAYER_2].item != ITEM_NONE) {
+    if (game->item != ITEM_NONE) {
         return;
     }
 
-    item = random_item();
-    timer = item == ITEM_BLUE ? BLUE_ACTIVE_TICKS : ITEM_ACTIVE_TICKS;
+    ItemType item = random_item();
+    int timer = (item == ITEM_BLUE) ? BLUE_ACTIVE_TICKS : ITEM_ACTIVE_TICKS;
 
-    game->players[PLAYER_1].item = item;
-    game->players[PLAYER_1].item_timer = timer;
-    game->players[PLAYER_1].green_stack = 0;
-
-    game->players[PLAYER_2].item = item;
-    game->players[PLAYER_2].item_timer = timer;
-    game->players[PLAYER_2].green_stack = 0;
+    game->item = item;
+    game->item_timer = timer;
 
     refresh_lcd(game);
     add_game_log(game, "item_spawn", item);
@@ -299,7 +277,6 @@ static void game_start(GameState *game) {
 }
 
 //게임초기화
-//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 void game_init(GameState *game) {
     memset(game, 0, sizeof(GameState));
 
@@ -313,6 +290,8 @@ void game_init(GameState *game) {
     game->rock_spawn_ticks = ROCK_SPAWN_TICKS;
     game->spawn_chance = 25;
     game->log_count = 0;
+    game->item = ITEM_NONE;
+    game->item_timer = 0;
 
     reset_player(&game->players[PLAYER_1]);
     reset_player(&game->players[PLAYER_2]);
@@ -337,7 +316,6 @@ void game_move_player(GameState *game, int player_index, int direction) {
 }
 
 //플레이어가 아이템 사용.
-//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 void game_use_item(GameState *game, int player_index) {
     Player *player;
     int opponent;
@@ -349,21 +327,22 @@ void game_use_item(GameState *game, int player_index) {
     player = &game->players[player_index];
     opponent = player_index ^ 1;
 
-    if (!player->alive || player->item == ITEM_NONE) {
+    if (!player->alive) {
         return;
     }
 
-    switch (player->item) {
+    switch (game->item) {
         case ITEM_RED:
+            // RED: 상대 플레이어 레인 중 하나에 랜덤 돌 생성 (즉시 발동)
             spawn_random_rock(game, opponent);
-            player->score += SCORE_ITEM_SUCCESS;
-            player->item = ITEM_NONE;
-            player->item_timer = 0;
+            game->item = ITEM_NONE;
+            game->item_timer = 0;
             add_game_log(game, "red_attack", player_index);
             DBG("red attack p=%d target=%d", player_index + 1, opponent + 1);
             break;
 
         case ITEM_GREEN:
+            // GREEN: 버튼 누를 때마다 개인 스택 증가 (아이템 지속)
             player->green_stack++;
             player->fkey = player->green_stack;
             add_game_log(game, "green_stack", player_index);
@@ -371,10 +350,11 @@ void game_use_item(GameState *game, int player_index) {
             break;
 
         case ITEM_BLUE:
+            // BLUE: 짧게 나타나며 누르면 자신의 레인 전체 청소
             clear_rocks(game, player_index);
+            game->item = ITEM_NONE;
+            game->item_timer = 0;
             player->score += SCORE_ITEM_SUCCESS;
-            player->item = ITEM_NONE;
-            player->item_timer = 0;
             add_game_log(game, "blue_clear", player_index);
             DBG("blue clear p=%d", player_index + 1);
             break;
@@ -532,7 +512,6 @@ void game_apply_event(GameState *game, GameEvent ev) {
     fclose(fp);
 }*/
 void save_game_log(GameLog logs[]) {
-    // 1. 권한 문제가 없는 /tmp 임시 메모리 폴더에 파일 생성
     FILE *fp = fopen("game_events.log", "w");
     int i;
     int saved_count = 0;

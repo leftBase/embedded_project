@@ -61,9 +61,7 @@ typedef struct {
     int score;
     int fkey;
     int alive;
-    ItemType item;
-    int item_timer;
-    int green_stack;
+    int green_stack;     // 플레이어별 그린 스택은 그대로 유지
 } Player;
 
 //돌 구조체
@@ -96,6 +94,9 @@ typedef struct {
     int spawn_chance;
     int winner;
     int log_count;
+
+    ItemType item;      /* ITEM_NONE / ITEM_RED / ITEM_GREEN / ITEM_BLUE */
+    int item_timer;     /* 남은 틱 동안의 타이머 */
 } GameState;
 
 //게임스테이트 초기화, 게임이벤트 구조체로 게임스테이트 변경, 게임틱 변경, 플레이어 이동, 템사용, 충돌체크, 로그저장

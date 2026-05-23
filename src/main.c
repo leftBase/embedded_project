@@ -21,7 +21,7 @@ static GameState g_game;
 static volatile int running = 1;
 
 //GUI, fnd 틱 10
-#define RENDER_INTERVAL_TICKS 10 
+#define RENDER_INTERVAL_TICKS 1
 #define FND_INTERVAL_TICKS 10
 
 //터미오스 tio, 키보드 초기화 여부, 원래 터미오스 플래그 저장
@@ -248,7 +248,6 @@ int main(int argc, char **argv) {
     int hw_enabled;
     int render_tick_count = 0;
     int need_render = 1;
-    int use_serial = argc > 1 && strcmp(argv[1], "--serial") == 0;  // 명령행 인자로 --serial이 있으면 시리얼 사용. 나중에 없앨거임
 
     //난수 시드, 디버그 초기화, 게임 초기화, 키보드 초기화, 렌더 초기화
     srand((unsigned int)time(NULL));
@@ -314,9 +313,24 @@ int main(int argc, char **argv) {
         }
     }
 
-    save_game_log(g_game.logs);
+// 1. 전역 러닝 플래그 내림
+    running = 0;
+
+    // 2. [추천 피드백] 큐 장부를 폐쇄하고 대기실에 갇힌 녀석들을 확 깨워 탈출시킴
+    queue_close(&g_queue);
+
+    // 3. 디바이스 파일 디스크립터들 먼저 닫기 (블로킹 I/O 강제 리턴 유도)
     serial_close();
     if (hw_enabled) hw_close();
+
+    // 4. 모든 보조 쓰레드가 깔끔하게 정돈되어 죽을 때까지 대기 및 자원 수거
+    pthread_join(timer, NULL);
+    pthread_join(keyboard, NULL);
+    if (hw_enabled) pthread_join(hw, NULL);
+    if (serial_enabled) pthread_join(serial, NULL);
+
+    // 5. 최종 메모리 및 로그 백업 정리
+    save_game_log(g_game.logs);
     render_shutdown();
     keyboard_close();
     debug_close();

@@ -205,12 +205,12 @@ static void build_player_panel(const GameState *game, int player_index, char lin
     snprintf(status, sizeof(status), "LIFE:%s   SCORE:%05d", life, player->score);
     make_content_line(lines[idx++], status);
 
-    if (player->item == ITEM_GREEN) {
+        if (game->item == ITEM_GREEN) {
         snprintf(item, sizeof(item), "ITEM:%s  STACK:%d  TIME:%d",
-                 item_to_string(player->item), player->green_stack, player->item_timer);
+                 item_to_string(game->item), player->green_stack, game->item_timer);
     } else {
         snprintf(item, sizeof(item), "ITEM:%s  TIME:%d",
-                 item_to_string(player->item), player->item_timer);
+                 item_to_string(game->item), game->item_timer);
     }
     make_content_line(lines[idx++], item);
 
