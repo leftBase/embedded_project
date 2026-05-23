@@ -28,6 +28,7 @@ static volatile int running = 1;
 static struct termios tio;
 static int original_stdin_flags = -1;
 static int keyboard_ready;
+static int simulator_autotest;
 
 //없어질 키보드 입력 초기화
 static void keyboard_init(void) {
@@ -73,6 +74,44 @@ static void keyboard_close(void) {
         fcntl(STDIN_FILENO, F_SETFL, original_stdin_flags);
     }
 }
+
+#ifdef SIMULATOR
+static void* autotest_thread(void* arg) {
+    (void)arg;
+
+    usleep(200000);
+    queue_push(&g_queue, EV_START, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_P1_LEFT, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_P1_RIGHT, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_P1_SKILL, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_P2_LEFT, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_P2_RIGHT, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_P2_SKILL, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_PAUSE, 1);
+
+    usleep(200000);
+    queue_push(&g_queue, EV_PAUSE, 1);
+
+    usleep(6000000);
+    queue_push(&g_queue, EV_QUIT, 1);
+
+    return NULL;
+}
+#endif
 
 
 // ####타이머스레드####
@@ -202,7 +241,10 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
     static int fnd_ticks;
     static int fnd_player;
 
-    if (!serial_enabled) {
+    /* Only send board outputs when the game is running. This prevents the
+     * simulator from flooding the terminal with FND/LCD updates after the
+     * game is over or paused. */
+    if (!serial_enabled || game->state != GAME_RUNNING) {
         return;
     }
 
@@ -244,42 +286,95 @@ int main(int argc, char **argv) {
     pthread_t serial;
     pthread_t hw;
     pthread_t timer;
+    pthread_t autotest;
     int serial_enabled;
     int hw_enabled;
+    int serial_thread_started = 0;
+    int hw_thread_started = 0;
+    int autotest_started = 0;
     int render_tick_count = 0;
     int need_render = 1;
+    int i;
+
+#ifdef SIMULATOR
+    simulator_autotest = 1;
+#else
+    simulator_autotest = 0;
+#endif
+
+    for (i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--autotest") == 0) {
+            simulator_autotest = 1;
+        } else if (strcmp(argv[i], "--manual") == 0) {
+            simulator_autotest = 0;
+        }
+    }
 
     //난수 시드, 디버그 초기화, 게임 초기화, 키보드 초기화, 렌더 초기화
-    srand((unsigned int)time(NULL));
+    srand(simulator_autotest ? 1U : (unsigned int)time(NULL));
     debug_init(getenv("GAME_DEBUG"));
-    DBG("program start use_serial=%d", use_serial);
+#ifdef SIMULATOR
+    DBG("program start simulator=1 autotest=%d", simulator_autotest);
+#else
+    DBG("program start simulator=0 autotest=%d", simulator_autotest);
+#endif
 
     //이벤트큐 초기화, 게임상태 초기화, 키보드 초기화, 렌더 초기화
     queue_init(&g_queue);
     game_init(&g_game);
-    keyboard_init();
+    if (!simulator_autotest) {
+        keyboard_init();
+    }
     render_init();
 
     //타이머, 키보드 스레드 생성
     pthread_create(&timer, NULL, timer_thread, NULL);
-    pthread_create(&keyboard, NULL, keyboard_thread, NULL);
+    if (!simulator_autotest) {
+        pthread_create(&keyboard, NULL, keyboard_thread, NULL);
+    }
+
+#ifdef SIMULATOR
+    if (simulator_autotest) {
+        pthread_create(&autotest, NULL, autotest_thread, NULL);
+        autotest_started = 1;
+        DBG("simulator autotest thread enabled");
+    }
+#endif
 
     // 초기화 성공시 하드웨어, 시리얼 스레드 생성
     hw_enabled = hw_init() == 0;
+#ifndef SIMULATOR
     if (hw_enabled) {
         pthread_create(&hw, NULL, hw_thread, NULL);
+        hw_thread_started = 1;
         DBG("hardware thread enabled");
     } else {
         DBG("hardware init failed or not present");
     }
+#else
+    if (hw_enabled) {
+        DBG("hardware simulator enabled");
+    } else {
+        DBG("hardware simulator init failed");
+    }
+#endif
 
     serial_enabled = m4_uart_init() == 0;
+#ifndef SIMULATOR
     if (serial_enabled) {
         pthread_create(&serial, NULL, serial_thread, NULL);
+        serial_thread_started = 1;
         DBG("serial thread enabled");
-    } else if (use_serial) {
+    } else {
         DBG("serial init failed errno=%d", errno);
     }
+#else
+    if (serial_enabled) {
+        DBG("serial simulator enabled");
+    } else {
+        DBG("serial simulator init failed errno=%d", errno);
+    }
+#endif
 
     //메인 루프: 이벤트 큐에서 이벤트 읽어서 게임에 적용. 틱 이벤트면 보드 업데이트, 렌더링 주기 체크해서 렌더링. 그 외 이벤트면 렌더링 필요 플래그 세움.
     while (running) {
@@ -325,14 +420,24 @@ int main(int argc, char **argv) {
 
     // 4. 모든 보조 쓰레드가 깔끔하게 정돈되어 죽을 때까지 대기 및 자원 수거
     pthread_join(timer, NULL);
-    pthread_join(keyboard, NULL);
-    if (hw_enabled) pthread_join(hw, NULL);
-    if (serial_enabled) pthread_join(serial, NULL);
+    if (!simulator_autotest) {
+        pthread_join(keyboard, NULL);
+    }
+#ifdef SIMULATOR
+    if (autotest_started) {
+        pthread_join(autotest, NULL);
+    }
+#else
+    if (hw_thread_started) pthread_join(hw, NULL);
+    if (serial_thread_started) pthread_join(serial, NULL);
+#endif
 
     // 5. 최종 메모리 및 로그 백업 정리
     save_game_log(g_game.logs);
     render_shutdown();
-    keyboard_close();
+    if (!simulator_autotest) {
+        keyboard_close();
+    }
     debug_close();
 
     return 0;
