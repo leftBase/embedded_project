@@ -123,7 +123,7 @@ static void spawn_rock(GameState *game, int player_index, int lane) {
     }
 }
 
-//실제 랜덤 돌생성.
+//호출되는 랜덤한 돌생성.
 static void spawn_random_rock(GameState *game, int player_index) {
     spawn_rock(game, player_index, rand() % LANE_COUNT);
 }
@@ -146,7 +146,9 @@ static void update_difficulty(GameState *game) {
     }
 }
 
-//
+//플레이어를 포문으로 돌필요가있나 플레이어마다 아이템 타이머가 0이고 아이템이그린이고 미리정한 스택 역치보다 스택이 높으면 맥스라이프 넘지 않게 life++
+//아이템 타이머는 아이템 활성화 시간동안 1씩 감소. 아이템 타이머가 0이되면 아이템 효과 종료. 그린 아이템은 타이머가 0이 될 때 체력 회복 판정. 회복 성공하면 점수 보상.
+//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 static void update_item_timers(GameState *game) {
     int p;
 
@@ -177,6 +179,8 @@ static void update_item_timers(GameState *game) {
     refresh_lcd(game);
 }
 
+//스텝틱이 아이템 스폰 틱 채우면 아이템 스폰. 아이템은 레드, 그린, 블루 중 랜덤. 아이템이 이미 있으면 안나오게. 아이템 효과 시간은 미리정한 시간으로 고정. 아이템 스폰하면 lcd 새로고침하고 로그에도 남김.
+//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 static void spawn_item_if_needed(GameState *game) {
     ItemType item;
     int timer;
@@ -205,8 +209,9 @@ static void spawn_item_if_needed(GameState *game) {
     DBG("item spawn item=%d timer=%d", item, timer);
 }
 
+//각각 랜덤 돌생성
 static void spawn_rocks_if_needed(GameState *game) {
-    if (game->tick_count == 0 || game->tick_count % game->rock_spawn_ticks != 0) {
+    if (game->tick_count == 0 || game->tick_count % game->rock_spawn_ticks != 0) { 
         return;
     }
 
@@ -219,6 +224,7 @@ static void spawn_rocks_if_needed(GameState *game) {
     }
 }
 
+//돌 이동하는데 포문으로하고 점수도 오름
 static void move_rocks(GameState *game) {
     int p;
     int i;
@@ -245,6 +251,7 @@ static void move_rocks(GameState *game) {
     }
 }
 
+//생존점수틱마다 점수
 static void update_survival_score(GameState *game) {
     int p;
 
@@ -259,6 +266,7 @@ static void update_survival_score(GameState *game) {
     }
 }
 
+//한놈죽으면 겜끝. 이긴사람이 winner
 static void check_game_over(GameState *game) {
     int p1_alive = game->players[PLAYER_1].alive;
     int p2_alive = game->players[PLAYER_2].alive;
@@ -281,6 +289,8 @@ static void check_game_over(GameState *game) {
     DBG("game over winner=%d", game->winner);
 }
 
+//게임시작
+//게임 초기화, running
 static void game_start(GameState *game) {
     game_init(game);
     game->state = GAME_RUNNING;
@@ -288,6 +298,8 @@ static void game_start(GameState *game) {
     DBG("game start");
 }
 
+//게임초기화
+//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 void game_init(GameState *game) {
     memset(game, 0, sizeof(GameState));
 
@@ -307,6 +319,7 @@ void game_init(GameState *game) {
     clear_all_rocks(game);
 }
 
+//플레이어 이동
 void game_move_player(GameState *game, int player_index, int direction) {
     Player *player;
 
@@ -323,6 +336,8 @@ void game_move_player(GameState *game, int player_index, int direction) {
     player->lane = clamp_lane(player->lane + direction);
 }
 
+//플레이어가 아이템 사용.
+//todo: GameState에서 item, item_timer, green_stack[2]관리함.
 void game_use_item(GameState *game, int player_index) {
     Player *player;
     int opponent;
@@ -332,7 +347,7 @@ void game_use_item(GameState *game, int player_index) {
     }
 
     player = &game->players[player_index];
-    opponent = opponent_of(player_index);
+    opponent = player_index ^ 1;
 
     if (!player->alive || player->item == ITEM_NONE) {
         return;
@@ -372,6 +387,7 @@ void game_use_item(GameState *game, int player_index) {
     refresh_lcd(game);
 }
 
+//플레이어랑 돌이랑 height 2차이나면 충돌.
 void game_check_collisions(GameState *game) {
     int p;
     int i;
@@ -411,6 +427,8 @@ void game_check_collisions(GameState *game) {
     }
 }
 
+//게임틱==update
+//GameState의 틱, 난이도, 아이템타이머, 스폰아이템, 스폰돌, 돌움직이기, 충돌판정, 생존점수, 게임오버판정 갱신
 void game_tick(GameState *game) {
     if (game->state != GAME_RUNNING) {
         return;
@@ -427,6 +445,8 @@ void game_tick(GameState *game) {
     check_game_over(game);
 }
 
+//GameEvent pop한걸 GameState에 적용
+//스타트, 퍼즈, 틱, 좌우,스킬, 종료
 void game_apply_event(GameState *game, GameEvent ev) {
     switch (ev.type) {
         case EV_START:
@@ -494,7 +514,8 @@ void game_apply_event(GameState *game, GameEvent ev) {
     }
 }
 
-void save_game_log(GameLog logs[]) {
+//게임로그 저장
+/*void save_game_log(GameLog logs[]) {
     FILE *fp = fopen("game_events.log", "w");
     int i;
 
@@ -509,4 +530,36 @@ void save_game_log(GameLog logs[]) {
     }
 
     fclose(fp);
+}*/
+void save_game_log(GameLog logs[]) {
+    // 1. 권한 문제가 없는 /tmp 임시 메모리 폴더에 파일 생성
+    FILE *fp = fopen("game_events.log", "w");
+    int i;
+    int saved_count = 0;
+
+    // 테라텀에 즉시 진입 알림
+    printf("\n[보드] 100개 규격 로그 저장 시작...\n");
+    fflush(stdout); 
+
+    if (fp == NULL) {
+        printf("[에러] 파일 생성 실패: %s\n", strerror(errno));
+        fflush(stdout);
+        return;
+    }
+
+    // 원래 스펙인 100개 루프로 원상복구
+    for (i = 0; i < 100; i++) {
+        // 포인터가 유효한 진짜 데이터만 필터링
+        if (logs[i].event != NULL) {
+            fprintf(fp, "%ld,%s,%d\n", logs[i].timestamp, logs[i].event, logs[i].value);
+            saved_count++;
+        }
+    }
+
+    fflush(fp); 
+    fclose(fp);
+
+    // 테라텀으로 결과 전송
+    printf("[성공] 총 %d개의 게임 로그가 /tmp/game_events.log 에 저장 완료!\n", saved_count);
+    fflush(stdout); 
 }

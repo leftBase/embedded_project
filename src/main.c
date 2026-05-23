@@ -14,26 +14,31 @@
 #include <time.h>
 #include <unistd.h>
 
+//이벤트큐, 게임상태 은닉화.
 static EventQueue g_queue;
 static GameState g_game;
 static volatile int running = 1;
 
+//GUI, fnd 틱 10
 #define RENDER_INTERVAL_TICKS 10
 #define FND_INTERVAL_TICKS 10
 
-static struct termios original_termios;
+//터미오스 tio, 키보드 초기화 여부, 원래 터미오스 플래그 저장
+static struct termios tio;
 static int original_stdin_flags = -1;
 static int keyboard_ready;
 
+//없어질 키보드 입력
 static void keyboard_init(void) {
     struct termios raw;
 
-    if (tcgetattr(STDIN_FILENO, &original_termios) != 0) {
+    if (tcgetattr(STDIN_FILENO, &tio) != 0) {
         DBG("tcgetattr failed errno=%d", errno);
         return;
     }
 
-    raw = original_termios;
+    // 원래 터미오스 설정을 raw 모드로 변경하여 키보드 입력을 비차단(non-blocking)으로 읽을 수 있도록 설정합니다. 이렇게 하면 getchar()나 read()가 키 입력이 없을 때 블록되지 않고 즉시 반환됩니다.
+    raw = tio;
     raw.c_iflag &= ~(ICRNL | IXON);
     raw.c_lflag &= ~(ICANON | ECHO);
     raw.c_cc[VMIN] = 0;
@@ -46,6 +51,7 @@ static void keyboard_init(void) {
 
     tcflush(STDIN_FILENO, TCIFLUSH);
 
+    //fcntl 함수를 사용하여 표준 입력(STDIN_FILENO)의 파일 상태 플래그를 가져오고, O_NONBLOCK 플래그를 추가하여 키보드 입력을 비차단 모드로 설정합니다. 이렇게 하면 키보드에서 입력이 없을 때 read() 함수가 즉시 반환되어 프로그램이 멈추지 않고 계속 실행될 수 있습니다.
     original_stdin_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
     if (original_stdin_flags >= 0) {
         fcntl(STDIN_FILENO, F_SETFL, original_stdin_flags | O_NONBLOCK);
@@ -54,29 +60,40 @@ static void keyboard_init(void) {
     keyboard_ready = 1;
 }
 
+//키보드 입력 원상복구
 static void keyboard_close(void) {
     if (!keyboard_ready) {
         return;
     }
 
-    tcsetattr(STDIN_FILENO, TCSANOW, &original_termios);
+    tcsetattr(STDIN_FILENO, TCSANOW, &tio);
 
     if (original_stdin_flags >= 0) {
         fcntl(STDIN_FILENO, F_SETFL, original_stdin_flags);
     }
 }
 
+
+// ####타이머스레드####
+
+//tick ms는 50. 50ms에 한번(20fps) 틱푸시하는
 static void* timer_thread(void* arg) {
     (void)arg;
 
     while (running) {
-        usleep(TICK_MS * 1000);
+        usleep(TICK_MS * 1000); 
         queue_push(&g_queue, EV_TICK, 0);
     }
 
     return NULL;
 }
 
+
+// ####키보드스레드####
+
+//a, d, q는 p1의 좌우 스킬
+//s는 스타트, p는 일시정지
+//j, l, o는 p2의 좌우 스킬, x는 종료
 static void* keyboard_thread(void* arg) {
     (void)arg;
 
@@ -129,6 +146,11 @@ static void* keyboard_thread(void* arg) {
     return NULL;
 }
 
+
+// ####시리얼스레드####
+
+// 다음 GameEvent를 EventQueue에 푸시
+//serial_next_event가 q6, m4의 입력을 감시한걸 사용
 static void* serial_thread(void* arg) {
     (void)arg;
 
@@ -148,6 +170,10 @@ static void* serial_thread(void* arg) {
     return NULL;
 }
 
+
+//fnd, lcd 업데이트
+//근데 이거 전에 안됐던거 같음
+//todo: buzzer, led업데이트
 static void update_board_outputs(int serial_enabled, const GameState *game) {
     static int last_lcd = -1;
     static int fnd_ticks;
@@ -180,6 +206,7 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
             errno);
     }
 }
+
 
 int main(int argc, char **argv) {
     pthread_t timer;

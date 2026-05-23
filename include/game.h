@@ -74,7 +74,7 @@ typedef struct {
     int type; //있어야됨? 점수처리 목적으로 공격할때 만든 돌인지에 쓰면 될듯함
 } Rock;
 
-//게임 로그 구조체(없어도 됨)
+//게임 로그 구조체(나중엔 없어도 됨)
 typedef struct {
     long timestamp;
     const char *event;
@@ -86,7 +86,7 @@ typedef struct {
     Player players[PLAYER_COUNT];
     Rock rocks[PLAYER_COUNT][MAX_ROCKS];
     GameMode state;
-    GameLog logs[1000];
+    GameLog logs[100];
     int lcd;
     int fnd;
     int music;
