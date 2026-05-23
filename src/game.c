@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+// 레인 한계넘으면 그냥 레인에 있게 함.
 static int clamp_lane(int lane) {
     if (lane < 0) {
         return 0;
@@ -17,10 +18,12 @@ static int clamp_lane(int lane) {
     return lane;
 }
 
+// 플레이어 인덱스 주면 상대방 인덱스 반환 이딴건 왜있는거임? 그냥 하드코딩으로 인덱스랑 1이랑 xor하게 바꾸면 되잖아. 
 static int opponent_of(int player_index) {
     return player_index == PLAYER_1 ? PLAYER_2 : PLAYER_1;
 }
 
+//플레이어 객체 초기화
 static void reset_player(Player *player) {
     player->lane = 1;
     player->speed = 1;
@@ -33,8 +36,9 @@ static void reset_player(Player *player) {
     player->green_stack = 0;
 }
 
+//로그카운트 1000으로 나눈 나머지가 인덱스, 타임스탬프는 틱, 이벤트는 이벤트 타입, 밸류는 밸류, 로그카운트 1증가. 1000개까지 저장.
 static void add_game_log(GameState *game, const char *event, int value) {
-    int index = game->log_count % 100;
+    int index = game->log_count % 1000;
 
     game->logs[index].timestamp = game->tick_count;
     game->logs[index].event = event;
@@ -42,6 +46,7 @@ static void add_game_log(GameState *game, const char *event, int value) {
     game->log_count++;
 }
 
+//돌청소-파란템
 static void clear_rocks(GameState *game, int player_index) {
     int i;
 
@@ -50,11 +55,13 @@ static void clear_rocks(GameState *game, int player_index) {
     }
 }
 
+//둘다 돌청소
 static void clear_all_rocks(GameState *game) {
     clear_rocks(game, PLAYER_1);
     clear_rocks(game, PLAYER_2);
 }
 
+//아이템 랜덤반환
 static ItemType random_item(void) {
     int r = rand() % 3;
 
@@ -69,6 +76,7 @@ static ItemType random_item(void) {
     return ITEM_BLUE;
 }
 
+//아이템 lcd 매칭
 static int lcd_from_item(ItemType item) {
     switch (item) {
         case ITEM_RED:
@@ -83,6 +91,7 @@ static int lcd_from_item(ItemType item) {
     }
 }
 
+//lcd 새로고침-지금보니까 p1 p2 아이템은 항상 같게 랜덤한데 고쳐야댄? item은 player에 잇으면 안되게슴
 static void refresh_lcd(GameState *game) {
     if (game->players[PLAYER_1].item != ITEM_NONE) {
         game->lcd = lcd_from_item(game->players[PLAYER_1].item);
@@ -97,6 +106,7 @@ static void refresh_lcd(GameState *game) {
     game->lcd = LCD_LOGO;
 }
 
+//호출되는 돌생성. 게임스테이트. 플레이어인덱스, 레인 받음.
 static void spawn_rock(GameState *game, int player_index, int lane) {
     int i;
 
@@ -113,10 +123,12 @@ static void spawn_rock(GameState *game, int player_index, int lane) {
     }
 }
 
+//실제 랜덤 돌생성.
 static void spawn_random_rock(GameState *game, int player_index) {
     spawn_rock(game, player_index, rand() % LANE_COUNT);
 }
 
+//스텝틱이 틱카운트 채우면 스텝 올라가고 돌 이동틱 작아짐. 스텝이 올라갈수록 스폰 확률도 올라감.
 static void update_difficulty(GameState *game) {
     int step = game->tick_count / DIFFICULTY_STEP_TICKS;
     int move_ticks = ROCK_MOVE_TICKS - step;
@@ -134,6 +146,7 @@ static void update_difficulty(GameState *game) {
     }
 }
 
+//
 static void update_item_timers(GameState *game) {
     int p;
 
