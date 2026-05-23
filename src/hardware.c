@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <stdlib.h>
+#include <errno.h>
 
 
 // 이 파일 안에서만 사용할 File Descriptor들 (은닉화)
@@ -66,15 +67,15 @@ void buzzer_play(double freq, int time_us) {
 
 
 // 내부) sys/input.h에 정의된 input_event 타입을 EventType으로 매핑해서 반환
-static int map_q6_key_event(const struct input_event *input, GameEvent *event) {
-    if (input->type != EV_KEY || input->value != 1) {
+static int map_q6_key_event(const struct input_event *ev, GameEvent *event) {
+    if (ev->type != EV_KEY || ev->value != 1) {
         return 0;
     }
 
     event->value = 1;
     event->item_type = ITEM_NONE;
 
-    switch (input->code) {
+    switch (ev->code) {
         case Q6_KEY_BACK:
             event->type = EV_P1_SKILL;
             return 1;
@@ -94,36 +95,23 @@ static int map_q6_key_event(const struct input_event *input, GameEvent *event) {
 }
 
 
-//
-int read_q6_event(int *code, int *value) {
-    if (button_fd < 0) return -1;
+// 4. q6 버튼 이벤트를 읽어 GameEvent로 매핑하여 반환
+int hw_next_event(GameEvent *event) {
+    if (event == NULL) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (button_fd < 0) {
+        errno = EBADF;
+        return -1;
+    }
 
     struct input_event ev;
-    ssize_t n = read(button_fd, &ev, sizeof(struct input_event));
-    if (n != sizeof(struct input_event)) {
-        return -1; // 읽기 실패
-    }
+    ssize_t n = read(button_fd, &ev, sizeof(ev));
 
-    if (ev.type != EV_KEY) {
-        return -1; // 키 이벤트가 아님
-    }
+    if (n < 0) return errno == EINTR ? 0 : -1;
+    if (n != sizeof(ev)) return 0;
 
-    *code = ev.code;
-    *value = ev.value;
-    return 0; // 성공
-}
-
-//q6버튼 이벤트 읽어서 EventType 매핑해 리턴
-    struct input_event input;
-    ssize_t n = read(q6_button_fd, &input, sizeof(input));
-
-    if (n < 0) {
-        return errno == EINTR ? 0 : -1;
-    }
-
-    if (n != sizeof(input)) {
-        return 0;
-    }
-
-    return map_q6_key_event(&input, event);
+    return map_q6_key_event(&ev, event);
 }

@@ -3,6 +3,7 @@
 #include "game.h"
 #include "render.h"
 #include "serial.h"
+#include "hardware.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -20,7 +21,7 @@ static GameState g_game;
 static volatile int running = 1;
 
 //GUI, fnd 틱 10
-#define RENDER_INTERVAL_TICKS 10
+#define RENDER_INTERVAL_TICKS 10 
 #define FND_INTERVAL_TICKS 10
 
 //터미오스 tio, 키보드 초기화 여부, 원래 터미오스 플래그 저장
@@ -28,7 +29,7 @@ static struct termios tio;
 static int original_stdin_flags = -1;
 static int keyboard_ready;
 
-//없어질 키보드 입력
+//없어질 키보드 입력 초기화
 static void keyboard_init(void) {
     struct termios raw;
 
@@ -76,7 +77,7 @@ static void keyboard_close(void) {
 
 // ####타이머스레드####
 
-//tick ms는 50. 50ms에 한번(20fps) 틱푸시하는
+//tick_ms는 50. 50ms에 한번(20fps) 틱푸시하는 주기 스레드
 static void* timer_thread(void* arg) {
     (void)arg;
 
@@ -149,10 +150,9 @@ static void* keyboard_thread(void* arg) {
 
 // ####시리얼스레드####
 
-// 다음 GameEvent를 EventQueue에 푸시
-//serial_next_event가 q6, m4의 입력을 감시한걸 사용
+// 다음 GameEvent를 EventQueue에 푸시 serial_next_event가 m4의 입력을 감시한걸 사용
 static void* serial_thread(void* arg) {
-    (void)arg;
+    (void)arg; // 인자 사용 안 함
 
     while (running) {
         GameEvent event;
@@ -163,6 +163,29 @@ static void* serial_thread(void* arg) {
             queue_push_event(&g_queue, event);
         } else if (result < 0) {
             DBG("serial_next_event failed errno=%d", errno);
+            usleep(20000);
+        }
+    }
+
+    return NULL;
+}
+
+
+// ####하드웨어스레드####
+
+// 하드웨어(Q6) 전용 스레드: hw_next_event로부터 이벤트를 받아 큐로 푸시
+static void* hw_thread(void* arg) {
+    (void)arg; // 인자 사용 안 함
+
+    while (running) {
+        GameEvent event;
+        int result = hw_next_event(&event);
+
+        if (result > 0) {
+            debug_log_event("hw_event", event);
+            queue_push_event(&g_queue, event);
+        } else if (result < 0) {
+            DBG("hw_next_event failed errno=%d", errno);
             usleep(20000);
         }
     }
@@ -183,6 +206,7 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
         return;
     }
 
+    //1. lcd이 바뀌었으면 시리얼로 보내기. 실패하면 로그에 남기기.
     if (game->lcd != last_lcd) {
         if (serial_send_lcd(game->lcd) == 0) {
             last_lcd = game->lcd;
@@ -191,6 +215,7 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
         }
     }
 
+    //2. fnd는 플레이어1,2 점수 번갈아가면서 보내기. 10틱마다 보내도록. 실패하면 로그에 남기기.
     fnd_ticks++;
     if (fnd_ticks < FND_INTERVAL_TICKS) {
         return;
@@ -205,31 +230,51 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
             game->players[fnd_player].score,
             errno);
     }
+
+    //3. buzzer, led 업데이트는 나중에...
 }
 
+// ####메인루프####
 
+// 게임 초기화, 스레드 생성, 이벤트 처리 루프, 종료시 정리
 int main(int argc, char **argv) {
-    pthread_t timer;
+    //chat **argv == char *argv[]: 명령행 인자 배열. argv[0]는 프로그램 이름, argv[1]부터는 실제 인자들. argc는 인자 개수.
+    //타이머, 키보드, 시리얼, 하드웨어 스레드 생성. 시리얼, 하드웨어는 초기화 성공시에만.
     pthread_t keyboard;
     pthread_t serial;
+    pthread_t hw;
+    pthread_t timer;
     int serial_enabled;
+    int hw_enabled;
     int render_tick_count = 0;
     int need_render = 1;
-    int use_serial = argc > 1 && strcmp(argv[1], "--serial") == 0;
+    int use_serial = argc > 1 && strcmp(argv[1], "--serial") == 0;  // 명령행 인자로 --serial이 있으면 시리얼 사용. 나중에 없앨거임
 
+    //난수 시드, 디버그 초기화, 게임 초기화, 키보드 초기화, 렌더 초기화
     srand((unsigned int)time(NULL));
     debug_init(getenv("GAME_DEBUG"));
     DBG("program start use_serial=%d", use_serial);
 
+    //이벤트큐 초기화, 게임상태 초기화, 키보드 초기화, 렌더 초기화
     queue_init(&g_queue);
     game_init(&g_game);
     keyboard_init();
     render_init();
 
+    //타이머, 키보드 스레드 생성
     pthread_create(&timer, NULL, timer_thread, NULL);
     pthread_create(&keyboard, NULL, keyboard_thread, NULL);
 
-    serial_enabled = use_serial && serial_init(NULL, 115200) == 0;
+    // 초기화 성공시 하드웨어, 시리얼 스레드 생성
+    hw_enabled = hw_init() == 0;
+    if (hw_enabled) {
+        pthread_create(&hw, NULL, hw_thread, NULL);
+        DBG("hardware thread enabled");
+    } else {
+        DBG("hardware init failed or not present");
+    }
+
+    serial_enabled = m4_uart_init() == 0;
     if (serial_enabled) {
         pthread_create(&serial, NULL, serial_thread, NULL);
         DBG("serial thread enabled");
@@ -237,6 +282,7 @@ int main(int argc, char **argv) {
         DBG("serial init failed errno=%d", errno);
     }
 
+    //메인 루프: 이벤트 큐에서 이벤트 읽어서 게임에 적용. 틱 이벤트면 보드 업데이트, 렌더링 주기 체크해서 렌더링. 그 외 이벤트면 렌더링 필요 플래그 세움.
     while (running) {
         GameEvent ev = queue_pop(&g_queue);
 
@@ -249,8 +295,10 @@ int main(int argc, char **argv) {
             debug_log_event("main_event", ev);
         }
 
+        //EV_QUIT, EV_TICK 아니면 로그 쓰고 이벤트 적용.
         game_apply_event(&g_game, ev);
 
+        //EV_TICK이면 보드 업데이트(fnd, lcd, led, buzzer)
         if (ev.type == EV_TICK) {
             update_board_outputs(serial_enabled, &g_game);
             render_tick_count++;
@@ -268,6 +316,7 @@ int main(int argc, char **argv) {
 
     save_game_log(g_game.logs);
     serial_close();
+    if (hw_enabled) hw_close();
     render_shutdown();
     keyboard_close();
     debug_close();

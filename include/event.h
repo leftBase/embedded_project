@@ -43,6 +43,7 @@ typedef struct {
     int tail;
     pthread_mutex_t lock;      // 큐를 보호하는 자물쇠
     pthread_cond_t not_empty;  // 큐에 데이터가 들어왔음을 알리는 알람
+    pthread_cond_t not_full;   // 큐에 빈 공간이 생겼음을 알리는 알람
 } EventQueue;
 
 void queue_init(EventQueue *q);
