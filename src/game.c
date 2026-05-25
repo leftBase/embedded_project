@@ -19,10 +19,6 @@ static int clamp_lane(int lane) {
     return lane;
 }
 
-// 플레이어 인덱스 주면 상대방 인덱스 반환 이딴건 왜있는거임? 그냥 하드코딩으로 인덱스랑 1이랑 xor하게 바꾸면 되잖아. 
-static int opponent_of(int player_index) {
-    return player_index == PLAYER_1 ? PLAYER_2 : PLAYER_1;
-}
 
 //플레이어 객체 초기화
 static void reset_player(Player *player) {
@@ -35,9 +31,9 @@ static void reset_player(Player *player) {
     player->green_stack = 0;
 }
 
-//로그카운트 1000으로 나눈 나머지가 인덱스, 타임스탬프는 틱, 이벤트는 이벤트 타입, 밸류는 밸류, 로그카운트 1증가. 1000개까지 저장.
+//로그카운트 100으로 나눈 나머지가 인덱스, 타임스탬프는 틱, 이벤트는 이벤트 타입, 밸류는 밸류, 로그카운트 1증가. 100개까지 저장.
 static void add_game_log(GameState *game, const char *event, int value) {
-    int index = game->log_count % 1000;
+    int index = game->log_count % 100;
 
     game->logs[index].timestamp = game->tick_count;
     game->logs[index].event = event;
