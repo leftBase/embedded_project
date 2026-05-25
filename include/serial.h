@@ -22,5 +22,6 @@ int serial_next_event(GameEvent *event);
 int serial_send_lcd(int preset);
 int serial_send_fnd_digit(int position, int value);
 int serial_send_fnd_number(int number);
+int serial_send_led(int led_index, int state);
 
 #endif // SERIAL_H

@@ -13,6 +13,11 @@
 #define HW_LED_OFF     0
 #define HW_LED_ON      1
 
+#define GPIO(BANK, IO) (((BANK) - 1) * 32 + (IO))
+#define Q6_LED_BACK    GPIO(1, 21)
+#define Q6_LED_HOME    GPIO(1, 16)
+#define Q6_LED_MENU    GPIO(1, 20)
+
 /* --- 로컬 시스템 생명주기 (Lifecycle) --- */
 // 시스템 시작 및 종료 시 각각 최초/최종 1회씩만 호출하여 전역 FD 자원 관리
 int hw_init(void);
