@@ -174,7 +174,7 @@ static void spawn_item_if_needed(GameState *game) {
     }
 
     ItemType item = random_item();
-    int timer = (item == ITEM_BLUE) ? BLUE_ACTIVE_TICKS : ITEM_ACTIVE_TICKS;
+    int timer = ITEM_ACTIVE_TICKS;
 
     game->item = item;
     game->item_timer = timer;

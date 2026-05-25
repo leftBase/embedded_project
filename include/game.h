@@ -24,10 +24,9 @@
 #define ROCK_MIN_MOVE_TICKS 5
 #define DIFFICULTY_STEP_TICKS 200
 
-//아이템 스폰틱 100, 활성화 80, 파란색활성화 20, 초록색 스택 5
+//아이템 스폰틱 100, 활성화 80, 초록색 스택 5
 #define ITEM_SPAWN_TICKS 100
 #define ITEM_ACTIVE_TICKS 80
-#define BLUE_ACTIVE_TICKS 20
 #define GREEN_HEAL_STACK 5
 
 //생존 점수 20틱에 10점, 돌피하기 20점, 아이템 성공 30점, 충돌 -30점
