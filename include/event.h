@@ -18,7 +18,8 @@ typedef enum {
     EV_P1_SKILL,
     EV_P2_LEFT,
     EV_P2_RIGHT,
-    EV_P2_SKILL
+    EV_P2_SKILL,
+    EV_SIM_FORCE_ITEM
 } EventType;
 
 typedef enum {

@@ -96,6 +96,20 @@ static void refresh_lcd(GameState *game) {
     game->lcd = lcd_from_item(game->item);
 }
 
+static void set_item_state(GameState *game, ItemType item, int timer) {
+    game->item = item;
+    game->item_timer = timer;
+    refresh_lcd(game);
+
+    if (item != ITEM_GREEN) {
+        int p;
+        for (p = 0; p < PLAYER_COUNT; p++) {
+            game->players[p].green_stack = 0;
+            game->players[p].fkey = 0;
+        }
+    }
+}
+
 //호출되는 돌생성. 게임스테이트. 플레이어인덱스, 레인 받음.
 static void spawn_rock(GameState *game, int player_index, int lane) {
     int i;
@@ -182,10 +196,7 @@ static void spawn_item_if_needed(GameState *game) {
     ItemType item = random_item();
     int timer = ITEM_ACTIVE_TICKS;
 
-    game->item = item;
-    game->item_timer = timer;
-
-    refresh_lcd(game);
+    set_item_state(game, item, timer);
     request_sound(game, SOUND_ITEM);
     add_game_log(game, "item_spawn", item);
     DBG("item spawn item=%d timer=%d", item, timer);
@@ -495,6 +506,17 @@ void game_apply_event(GameState *game, GameEvent ev) {
         case EV_P2_SKILL:
             if (game->state == GAME_RUNNING) {
                 game_use_item(game, PLAYER_2);
+            }
+            break;
+
+        case EV_SIM_FORCE_ITEM:
+            if (game->state == GAME_RUNNING) {
+                ItemType item = ev.item_type;
+                int timer = (item == ITEM_NONE) ? 0 : ITEM_ACTIVE_TICKS;
+                set_item_state(game, item, timer);
+                request_sound(game, item == ITEM_NONE ? SOUND_NONE : SOUND_ITEM);
+                add_game_log(game, "sim_force_item", item);
+                DBG("sim force item=%d timer=%d", item, timer);
             }
             break;
 

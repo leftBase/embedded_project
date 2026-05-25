@@ -4,6 +4,9 @@
 #include "render.h"
 #include "serial.h"
 #include "hardware.h"
+#ifdef SIMULATOR
+#include "simulator.h"
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -23,8 +26,6 @@ static volatile int running = 1;
 //GUI, fnd 틱 10
 #define RENDER_INTERVAL_TICKS 1
 #define FND_INTERVAL_TICKS 10
-
-static int use_serial = 1;
 
 //터미오스 tio, 키보드 초기화 여부, 원래 터미오스 플래그 저장
 static struct termios tio;
@@ -78,37 +79,80 @@ static void keyboard_close(void) {
 }
 
 #ifdef SIMULATOR
+static void autotest_sleep_ms(int ms) {
+    usleep((useconds_t)ms * 1000);
+}
+
+static void autotest_force_item(ItemType item) {
+    GameEvent ev;
+
+    ev.type = EV_SIM_FORCE_ITEM;
+    ev.value = (int)item;
+    ev.item_type = item;
+    queue_push_event(&g_queue, ev);
+}
+
+static void autotest_m4_click(int button_id) {
+    sim_push_m4_button(button_id, 1);
+    autotest_sleep_ms(80);
+    sim_push_m4_button(button_id, 0);
+    autotest_sleep_ms(120);
+}
+
+static void autotest_q6_click(int key_code) {
+    sim_push_q6_key(key_code, 1);
+    autotest_sleep_ms(80);
+    sim_push_q6_key(key_code, 0);
+    autotest_sleep_ms(120);
+}
+
 static void* autotest_thread(void* arg) {
     (void)arg;
 
-    usleep(200000);
-    queue_push(&g_queue, EV_START, 1);
+    sim_autotest_note("start: M4 start button should queue EV_START and light LED2");
+    autotest_sleep_ms(200);
+    autotest_m4_click(2);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_P1_LEFT, 1);
+    sim_autotest_note("lcd sequence: LOGO");
+    autotest_force_item(ITEM_NONE);
+    autotest_sleep_ms(400);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_P1_RIGHT, 1);
+    sim_autotest_note("m4 movement buttons: LED0, LED1, LED3, LED4 and queue movement events");
+    autotest_m4_click(0);
+    autotest_m4_click(1);
+    autotest_m4_click(3);
+    autotest_m4_click(4);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_P1_SKILL, 1);
+    sim_autotest_note("lcd sequence: RED then Q6 BACK should use P1 red attack");
+    autotest_force_item(ITEM_RED);
+    autotest_sleep_ms(300);
+    autotest_q6_click(Q6_KEY_BACK);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_P2_LEFT, 1);
+    sim_autotest_note("lcd sequence: GREEN then Q6 BACK five times should stack and heal");
+    autotest_force_item(ITEM_GREEN);
+    autotest_sleep_ms(300);
+    autotest_q6_click(Q6_KEY_BACK);
+    autotest_q6_click(Q6_KEY_BACK);
+    autotest_q6_click(Q6_KEY_BACK);
+    autotest_q6_click(Q6_KEY_BACK);
+    autotest_q6_click(Q6_KEY_BACK);
+    autotest_sleep_ms(ITEM_ACTIVE_TICKS * TICK_MS + 300);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_P2_RIGHT, 1);
+    sim_autotest_note("lcd sequence: BLUE then Q6 BACK should clear P1 rocks");
+    autotest_force_item(ITEM_BLUE);
+    autotest_sleep_ms(300);
+    autotest_q6_click(Q6_KEY_BACK);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_P2_SKILL, 1);
+    sim_autotest_note("Q6 MENU should light its LED and queue P2 skill");
+    autotest_q6_click(Q6_KEY_MENU);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_PAUSE, 1);
+    sim_autotest_note("Q6 HOME should light its LED and toggle pause twice");
+    autotest_q6_click(Q6_KEY_HOME);
+    autotest_q6_click(Q6_KEY_HOME);
 
-    usleep(200000);
-    queue_push(&g_queue, EV_PAUSE, 1);
-
-    usleep(6000000);
+    autotest_force_item(ITEM_NONE);
+    autotest_sleep_ms(600);
+    sim_autotest_note("quit");
     queue_push(&g_queue, EV_QUIT, 1);
 
     return NULL;
@@ -270,10 +314,7 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
         }
     }
 
-    /* Only send board outputs when the game is running. This prevents the
-     * simulator from flooding the terminal with FND/LCD updates after the
-     * game is over or paused. */
-    if (!serial_enabled || game->state != GAME_RUNNING) {
+    if (!serial_enabled) {
         return;
     }
 
@@ -284,6 +325,10 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
         } else {
             DBG("lcd send failed lcd=%d errno=%d", game->lcd, errno);
         }
+    }
+
+    if (game->state != GAME_RUNNING) {
+        return;
     }
 
     //2. fnd는 플레이어1,2 점수 번갈아가면서 보내기. 10틱마다 보내도록. 실패하면 로그에 남기기.
@@ -315,21 +360,24 @@ int main(int argc, char **argv) {
     pthread_t serial;
     pthread_t hw;
     pthread_t timer;
+#ifdef SIMULATOR
     pthread_t autotest;
+#endif
     int serial_enabled;
     int hw_enabled;
     int serial_thread_started = 0;
     int hw_thread_started = 0;
+#ifdef SIMULATOR
     int autotest_started = 0;
+#endif
     int render_tick_count = 0;
     int need_render = 1;
+#ifdef SIMULATOR
     int i;
+#endif
 
 #ifdef SIMULATOR
     simulator_autotest = 1;
-#else
-    simulator_autotest = 0;
-#endif
 
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--autotest") == 0) {
@@ -338,6 +386,11 @@ int main(int argc, char **argv) {
             simulator_autotest = 0;
         }
     }
+#else
+    simulator_autotest = 0;
+    (void)argc;
+    (void)argv;
+#endif
 
     //난수 시드, 디버그 초기화, 게임 초기화, 키보드 초기화, 렌더 초기화
     srand((unsigned int)time(NULL));
@@ -362,14 +415,6 @@ int main(int argc, char **argv) {
         pthread_create(&keyboard, NULL, keyboard_thread, NULL);
     }
 
-#ifdef SIMULATOR
-    if (simulator_autotest) {
-        pthread_create(&autotest, NULL, autotest_thread, NULL);
-        autotest_started = 1;
-        DBG("simulator autotest thread enabled");
-    }
-#endif
-
     // 초기화 성공시 하드웨어, 시리얼 스레드 생성
     hw_enabled = hw_init() == 0;
 #ifndef SIMULATOR
@@ -382,7 +427,9 @@ int main(int argc, char **argv) {
     }
 #else
     if (hw_enabled) {
-        DBG("hardware simulator enabled");
+        pthread_create(&hw, NULL, hw_thread, NULL);
+        hw_thread_started = 1;
+        DBG("hardware simulator thread enabled");
     } else {
         DBG("hardware simulator init failed");
     }
@@ -399,9 +446,19 @@ int main(int argc, char **argv) {
     }
 #else
     if (serial_enabled) {
-        DBG("serial simulator enabled");
+        pthread_create(&serial, NULL, serial_thread, NULL);
+        serial_thread_started = 1;
+        DBG("serial simulator thread enabled");
     } else {
         DBG("serial simulator init failed errno=%d", errno);
+    }
+#endif
+
+#ifdef SIMULATOR
+    if (simulator_autotest) {
+        pthread_create(&autotest, NULL, autotest_thread, NULL);
+        autotest_started = 1;
+        DBG("simulator autotest thread enabled");
     }
 #endif
 
@@ -461,10 +518,9 @@ int main(int argc, char **argv) {
     if (autotest_started) {
         pthread_join(autotest, NULL);
     }
-#else
+#endif
     if (hw_thread_started) pthread_join(hw, NULL);
     if (serial_thread_started) pthread_join(serial, NULL);
-#endif
 
     // 5. 최종 메모리 및 로그 백업 정리
     save_game_log(g_game.logs);

@@ -73,6 +73,13 @@ make sim
 ./racing_game --autotest
 ```
 
+자동 검증 스크립트:
+```bash
+bash scripts/sim_autotest.sh
+```
+
+이 스크립트는 `make sim`으로 시뮬레이터를 빌드하고 `--autotest`를 실행한 뒤 `sim_serial.log`, `game_events.log`, `game_debug.log`, `run_stdout.log`를 grep으로 검증한다.
+
 ## 시뮬레이터 조작 키
 - `s`: 시작
 - `p`: 일시정지
@@ -127,15 +134,31 @@ timestamp,event,value
 
 형식:
 ```text
-[SIM] LCD preset=0
-[SIM] FND number=120
+[SIM][LCD] preset=0 label=LOGO packet=12 24 30 30 13
+[SIM][M4_BUTTON_RX] packet=12 22 30 31 13 id=0 pressed=1
+[SIM][M4_LED] index=0 state=ON packet=12 21 30 31 13
+[SIM][Q6_KEY_RX] code=158 pressed=1
+[SIM][Q6_LED] pin=21 state=ON
+[SIM][FND] number=120 digits=120
+[SIM][BUZZER] freq=659.00 time_us=60000
 ```
 
 읽는 법:
 - `LCD preset=0..3`는 현재 LCD 상태를 뜻한다.
 	- `0=LOGO`, `1=RED`, `2=GREEN`, `3=BLUE`
 - `FND number=...`는 점수 표시값이다.
-- 필요하면 `SIM_SERIAL_VERBOSE=1`을 주고 실행하면 raw serial 패킷도 기록한다.
+- `M4_BUTTON_RX`는 M4 버튼 수신 패킷을 뜻한다.
+	- `id=0..4`: P1 left, P1 right, start, P2 left, P2 right
+	- `pressed=1`은 press, `pressed=0`은 release다.
+- `M4_LED`는 M4 LED 출력 패킷을 뜻한다.
+	- 호출 의미는 `1=ON`, `0=OFF`다.
+	- 패킷의 VAR2는 `0x31=ON`, `0x30=OFF`다.
+- `Q6_KEY_RX`는 Q6 BACK/HOME/MENU 입력을 뜻한다.
+	- `158=BACK`, `172=HOME`, `139=MENU`
+- `Q6_LED`는 Q6 GPIO LED 출력을 뜻한다.
+	- `pin=21 BACK`, `pin=16 HOME`, `pin=20 MENU`
+- `BUZZER`는 게임 상황별 부저 출력 대체 로그다.
+- 필요하면 `SIM_SERIAL_VERBOSE=1`을 주고 실행하면 raw serial write도 기록한다.
 
 ### 4) `run_stdout.log`
 실행 중 화면 렌더와 표준 출력 전체를 저장한 파일이다.
@@ -155,12 +178,29 @@ ANSI escape + ASCII UI + status line
 3. 아이템 스폰을 기다린 뒤 빨강/초록/파랑을 각각 사용해 본다.
 4. 종료 후 `game_events.log`, `game_debug.log`, `sim_serial.log`, `run_stdout.log`를 비교한다.
 
+완전 자동 검증:
+```bash
+bash scripts/sim_autotest.sh
+```
+
+자동 검증은 다음을 확인한다.
+- LCD가 `LOGO -> RED -> GREEN -> BLUE` 순서로 출력되는지
+- M4 button 0~4 press/release가 각각 M4 LED 0~4를 켰다가 끄는지
+- M4 button 이벤트가 `serial_thread -> EventQueue -> main thread` 경로로 들어오는지
+- Q6 BACK/HOME/MENU press/release가 각각 GPIO LED를 켰다가 끄는지
+- Q6 key 이벤트가 `hw_thread -> EventQueue -> main thread` 경로로 들어오는지
+- red/green/blue item 처리 결과가 `game_events.log`에 남는지
+- buzzer, FND, LCD, LED 패킷/대체 로그가 `sim_serial.log`에 남는지
+
 ## 로그 해석 요약
 - 화면에서 아이템이 사라졌는데 `blue_clear`가 없으면, 타이머 만료로 사라진 것이다.
 - `blue_clear`가 있으면 파랑 스킬로 제거된 것이다.
 - `sim_lcd=3`는 파랑 아이템 표시가 실제로 전송되었음을 뜻한다.
 - `green_stack`가 누적된 뒤 `green_heal`이 나오면 초록 아이템이 정상 동작한 것이다.
 - `red_attack` 뒤에 상대방 돌이 추가되고 충돌하면 빨강 공격이 정상 동작한 것이다.
+- `sim_force_item,0/1/2/3`은 자동 검증에서 LCD LOGO/RED/GREEN/BLUE 상태를 강제로 만든 기록이다.
+- `serial_event type=EV_START` 같은 로그가 있으면 M4 입력이 큐를 거쳐 main thread까지 들어온 것이다.
+- `hw_event type=EV_P1_SKILL` 같은 로그가 있으면 Q6 입력이 큐를 거쳐 main thread까지 들어온 것이다.
 
 ## 아키텍처
 핵심 키워드:
@@ -192,7 +232,8 @@ ANSI escape + ASCII UI + status line
 - timer_thread
 - keyboard_thread(autotest 비활성 시)
 - autotest_thread(autotest 활성 시, 테스트 이벤트 자동 주입)
-- serial/hardware는 simulator stub로 동작
+- serial_thread/hw_thread
+- serial/hardware 함수는 simulator stub로 동작하지만 입력은 내부 queue를 거쳐 실제 thread 경로로 main queue에 들어간다.
 
 ## 이벤트 처리 흐름
 Q6 버튼 / M4 UART / 키보드(또는 autotest)
@@ -214,7 +255,7 @@ make
 시뮬레이터 빌드:
 ```bash
 make sim
-./racing_game
+./racing_game --manual
 ```
 
 자동 테스트 모드:

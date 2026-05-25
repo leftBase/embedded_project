@@ -10,9 +10,10 @@
 
 ### `Makefile`
 
-- `SRCS := $(wildcard src/*.c)`로 변경했다.
-- 기존에 빠져 있던 `src/hardware.c`가 빌드에 포함된다.
-- 이후 `src/*.c`가 추가되어도 Makefile을 다시 고칠 필요가 적다.
+- board/sim 빌드가 서로 다른 object 디렉터리를 쓰게 했다.
+  - board: `build/board/...`
+  - sim: `build/sim/...`
+- `make sim` 뒤 `make`를 해도 `-DSIMULATOR`로 컴파일된 object가 보드 빌드에 섞이지 않는다.
 - include 경로는 `CPPFLAGS ?= -Iinclude`로 분리했다.
 
 ### `include/serial.h`
@@ -149,11 +150,55 @@ int sound_seq;
 
 ### `src/main.c`
 
-- 누락되어 있던 `use_serial` 정의를 추가했다.
+- `use_serial` 흔적은 제거하고 `serial_enabled` 결과만 기준으로 보드 출력을 갱신하게 했다.
 - `update_board_outputs()`에서 `sound_seq` 변화를 감지해 짧은 buzzer effect를 재생한다.
+- LCD는 READY/PAUSED/GAME_OVER 상태에서도 상태가 바뀌면 전송한다.
+- FND는 게임 실행 중에만 갱신한다.
 - 게임오버 상태에서 `EV_PAUSE`가 들어오면 프로그램을 종료한다.
   - Q6 `HOME` key는 기존 매핑상 `EV_PAUSE`이므로, 게임오버 화면에서 Q6 HOME을 누르면 종료된다.
   - 키보드가 없어도 하드웨어 입력만으로 종료 가능하다.
+- simulator autotest는 M4/Q6 입력 경로를 직접 타도록 바꿨다.
+  - M4 입력은 `sim_push_m4_button()` -> `serial_next_event()` -> `serial_thread` -> `EventQueue` -> main thread 순서로 들어간다.
+  - Q6 입력은 `sim_push_q6_key()` -> `hw_next_event()` -> `hw_thread` -> `EventQueue` -> main thread 순서로 들어간다.
+
+### `include/event.h`
+
+- simulator 자동 검증용 이벤트 `EV_SIM_FORCE_ITEM`을 추가했다.
+- 이 이벤트는 autotest에서 LCD/아이템 상태를 `LOGO -> RED -> GREEN -> BLUE` 순서로 강제하기 위한 것이다.
+
+### `include/simulator.h`
+
+- simulator 자동 입력 주입 함수 선언을 추가했다.
+
+```c
+void sim_push_m4_button(int button_id, int pressed);
+void sim_push_q6_key(int key_code, int pressed);
+void sim_autotest_note(const char *message);
+```
+
+### `src/simulator.c`
+
+- simulator stub를 단순 no-op에서 입력/출력 검증용 stub로 확장했다.
+- M4/Q6 입력용 내부 queue를 추가했다.
+- `serial_next_event()`와 `hw_next_event()`가 실제로 queue에서 이벤트를 꺼내게 했다.
+- M4 button 수신 packet, M4 LED packet, LCD packet, FND packet, Q6 key, Q6 LED, buzzer를 `sim_serial.log`에 남긴다.
+- 종료 시 simulator queue를 닫아 serial/hardware thread가 깔끔하게 빠져나오게 했다.
+
+### `scripts/sim_autotest.sh`
+
+- 자동 검증 스크립트를 추가했다.
+- 하는 일:
+  - `make clean`
+  - `make sim`
+  - `./racing_game --autotest`
+  - `sim_serial.log`, `game_events.log`, `game_debug.log` 패턴 검증
+- 확인 항목:
+  - LCD `LOGO -> RED -> GREEN -> BLUE` 출력 및 순서
+  - M4 button 0~4 press/release와 LED 0~4 ON/OFF
+  - Q6 BACK/HOME/MENU press/release와 GPIO LED ON/OFF
+  - FND, buzzer 로그
+  - red/green/blue item 처리 로그
+  - serial/hardware thread가 이벤트를 큐에 넣은 흔적
 
 ## LED 동작 결론
 
@@ -161,6 +206,12 @@ int sound_seq;
 
 - M4 LED 0~4: M4 button press 때 켜지고 release 때 꺼진다. 프로그램 종료 시에도 전부 OFF packet을 보낸다.
 - Q6 GPIO LED 3개: Q6 BACK/HOME/MENU press 때 켜지고 release 때 꺼진다. `hw_close()`에서도 전부 OFF 처리한다.
+
+## 반전충돌 설명
+
+- 여기서 말한 반전충돌은 코드의 상태값과 장치 문서의 ON/OFF 의미가 뒤집혀 적용되는 상황을 뜻한다.
+- 이번 구현은 호출부와 simulator 로그 모두 `1=ON`, `0=OFF`로 맞췄다.
+- M4 LED packet도 첨부 자료 기준대로 `0x31=ON`, `0x30=OFF`를 보낸다.
 
 ## 큐 안전성
 

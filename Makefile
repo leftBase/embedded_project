@@ -4,9 +4,6 @@ TARGET ?= racing_game
 SRC_DIR := src
 INC_DIR := include
 
-SRCS := $(wildcard $(SRC_DIR)/*.c)
-OBJS := $(SRCS:.c=.o)
-
 CPPFLAGS ?= -I$(INC_DIR)
 CFLAGS ?= -Wall -Wextra -std=c99 -D_DEFAULT_SOURCE -DENABLE_DEBUG_LOG
 LDFLAGS ?= -pthread
@@ -18,14 +15,14 @@ SRCS = src/main.c src/game.c src/event.c src/render.c src/debug.c src/simulator.
 else
 SRCS = src/main.c src/game.c src/event.c src/render.c src/serial.c src/hardware.c src/debug.c
 endif
-OBJS = $(SRCS:.c=.o)
 
-.PHONY: all clean
+MODE := $(if $(filter 1,$(SIMULATOR)),sim,board)
+BUILD_DIR := build/$(MODE)
+OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SRCS))
+
+.PHONY: all sim clean
 
 all: $(TARGET)
-
-
-.PHONY: sim clean
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
@@ -33,8 +30,9 @@ $(TARGET): $(OBJS)
 sim:
 	$(MAKE) SIMULATOR=1 $(TARGET)
 
-%.o: %.c
+$(BUILD_DIR)/%.o: %.c
+	mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(TARGET)
+	rm -rf build $(TARGET)

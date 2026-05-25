@@ -19,6 +19,7 @@ static const char *event_name(EventType type) {
         case EV_P2_LEFT: return "EV_P2_LEFT";
         case EV_P2_RIGHT: return "EV_P2_RIGHT";
         case EV_P2_SKILL: return "EV_P2_SKILL";
+        case EV_SIM_FORCE_ITEM: return "EV_SIM_FORCE_ITEM";
         default: return "EV_UNKNOWN";
     }
 }
