@@ -1,8 +1,16 @@
 CC ?= gcc
-TARGET = racing_game
+TARGET ?= racing_game
 
-CFLAGS ?= -Wall -Wextra -std=c99 -D_DEFAULT_SOURCE -DENABLE_DEBUG_LOG -Iinclude
+SRC_DIR := src
+INC_DIR := include
+
+SRCS := $(wildcard $(SRC_DIR)/*.c)
+OBJS := $(SRCS:.c=.o)
+
+CPPFLAGS ?= -I$(INC_DIR)
+CFLAGS ?= -Wall -Wextra -std=c99 -D_DEFAULT_SOURCE -DENABLE_DEBUG_LOG
 LDFLAGS ?= -pthread
+LDLIBS ?=
 
 ifeq ($(SIMULATOR),1)
 CFLAGS += -DSIMULATOR
@@ -12,16 +20,21 @@ SRCS = src/main.c src/game.c src/event.c src/render.c src/serial.c src/hardware.
 endif
 OBJS = $(SRCS:.c=.o)
 
+.PHONY: all clean
+
+all: $(TARGET)
+
+
 .PHONY: sim clean
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDFLAGS)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
 sim:
 	$(MAKE) SIMULATOR=1 $(TARGET)
 
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(OBJS) $(TARGET)

@@ -24,6 +24,8 @@ static volatile int running = 1;
 #define RENDER_INTERVAL_TICKS 1
 #define FND_INTERVAL_TICKS 10
 
+static int use_serial = 1;
+
 //터미오스 tio, 키보드 초기화 여부, 원래 터미오스 플래그 저장
 static struct termios tio;
 static int original_stdin_flags = -1;
@@ -233,13 +235,40 @@ static void* hw_thread(void* arg) {
 }
 
 
-//fnd, lcd 업데이트
-//근데 이거 전에 안됐던거 같음
-//todo: buzzer, led업데이트
+// buzzer, fnd, lcd 업데이트. M4/Q6 입력 LED는 입력 수신 위치에서 처리한다.
 static void update_board_outputs(int serial_enabled, const GameState *game) {
     static int last_lcd = -1;
+    static int last_sound_seq;
     static int fnd_ticks;
     static int fnd_player;
+
+    if (game->sound_seq != last_sound_seq) {
+        last_sound_seq = game->sound_seq;
+
+        switch (game->sound) {
+            case SOUND_CRASH:
+                buzzer_play(196.0, 70000);
+                break;
+            case SOUND_ITEM:
+                buzzer_play(659.0, 60000);
+                break;
+            case SOUND_ATTACK:
+                buzzer_play(523.0, 60000);
+                break;
+            case SOUND_HEAL:
+                buzzer_play(784.0, 70000);
+                break;
+            case SOUND_CLEAR:
+                buzzer_play(880.0, 70000);
+                break;
+            case SOUND_GAME_OVER:
+                buzzer_play(262.0, 120000);
+                break;
+            case SOUND_NONE:
+            default:
+                break;
+        }
+    }
 
     /* Only send board outputs when the game is running. This prevents the
      * simulator from flooding the terminal with FND/LCD updates after the
@@ -273,7 +302,7 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
             errno);
     }
 
-    //3. buzzer, led 업데이트는 나중에...
+    // M4 입력 LED는 serial read 쪽에서 버튼 press/release에 맞춰 바로 갱신한다.
 }
 
 // ####메인루프####
@@ -311,7 +340,7 @@ int main(int argc, char **argv) {
     }
 
     //난수 시드, 디버그 초기화, 게임 초기화, 키보드 초기화, 렌더 초기화
-    srand(simulator_autotest ? 1U : (unsigned int)time(NULL));
+    srand((unsigned int)time(NULL));
     debug_init(getenv("GAME_DEBUG"));
 #ifdef SIMULATOR
     DBG("program start simulator=1 autotest=%d", simulator_autotest);
@@ -381,6 +410,11 @@ int main(int argc, char **argv) {
         GameEvent ev = queue_pop(&g_queue);
 
         if (ev.type == EV_QUIT) {
+            running = 0;
+            break;
+        }
+
+        if (ev.type == EV_PAUSE && g_game.state == GAME_OVER) {
             running = 0;
             break;
         }

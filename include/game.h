@@ -27,6 +27,7 @@
 //아이템 스폰틱 100, 활성화 80, 초록색 스택 5
 #define ITEM_SPAWN_TICKS 100
 #define ITEM_ACTIVE_TICKS 80
+#define BLUE_ACTIVE_TICKS ITEM_ACTIVE_TICKS
 #define GREEN_HEAL_STACK 5
 
 //생존 점수 20틱에 10점, 돌피하기 20점, 아이템 성공 30점, 충돌 -30점
@@ -51,6 +52,16 @@ typedef enum {
     LCD_GREEN = 2,
     LCD_BLUE = 3
 } LcdPreset;
+
+typedef enum {
+    SOUND_NONE = 0,
+    SOUND_CRASH,
+    SOUND_ITEM,
+    SOUND_ATTACK,
+    SOUND_HEAL,
+    SOUND_CLEAR,
+    SOUND_GAME_OVER
+} SoundType;
 
 //플레이어 구조체
 typedef struct {
@@ -93,6 +104,8 @@ typedef struct {
     int spawn_chance;
     int winner;
     int log_count;
+    SoundType sound;
+    int sound_seq;
 
     ItemType item;      /* ITEM_NONE / ITEM_RED / ITEM_GREEN / ITEM_BLUE */
     int item_timer;     /* 남은 틱 동안의 타이머 */

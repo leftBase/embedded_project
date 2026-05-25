@@ -41,6 +41,11 @@ static void add_game_log(GameState *game, const char *event, int value) {
     game->log_count++;
 }
 
+static void request_sound(GameState *game, SoundType sound) {
+    game->sound = sound;
+    game->sound_seq++;
+}
+
 //돌청소-파란템
 static void clear_rocks(GameState *game, int player_index) {
     int i;
@@ -149,6 +154,7 @@ static void update_item_timers(GameState *game) {
                         game->players[p].life++;
                     }
                     game->players[p].score += SCORE_ITEM_SUCCESS;
+                    request_sound(game, SOUND_HEAL);
                     add_game_log(game, "green_heal", p);
                     DBG("green heal p=%d life=%d stack=%d", p + 1, game->players[p].life, game->players[p].green_stack);
                 }
@@ -180,6 +186,7 @@ static void spawn_item_if_needed(GameState *game) {
     game->item_timer = timer;
 
     refresh_lcd(game);
+    request_sound(game, SOUND_ITEM);
     add_game_log(game, "item_spawn", item);
     DBG("item spawn item=%d timer=%d", item, timer);
 }
@@ -260,6 +267,7 @@ static void check_game_over(GameState *game) {
         game->winner = PLAYER_2;
     }
 
+    request_sound(game, SOUND_GAME_OVER);
     add_game_log(game, "game_over", game->winner);
     DBG("game over winner=%d", game->winner);
 }
@@ -287,6 +295,8 @@ void game_init(GameState *game) {
     game->rock_spawn_ticks = ROCK_SPAWN_TICKS;
     game->spawn_chance = 25;
     game->log_count = 0;
+    game->sound = SOUND_NONE;
+    game->sound_seq = 0;
     game->item = ITEM_NONE;
     game->item_timer = 0;
 
@@ -334,6 +344,8 @@ void game_use_item(GameState *game, int player_index) {
             spawn_random_rock(game, opponent);
             game->item = ITEM_NONE;
             game->item_timer = 0;
+            player->score += SCORE_ITEM_SUCCESS;
+            request_sound(game, SOUND_ATTACK);
             add_game_log(game, "red_attack", player_index);
             DBG("red attack p=%d target=%d", player_index + 1, opponent + 1);
             break;
@@ -352,6 +364,7 @@ void game_use_item(GameState *game, int player_index) {
             game->item = ITEM_NONE;
             game->item_timer = 0;
             player->score += SCORE_ITEM_SUCCESS;
+            request_sound(game, SOUND_CLEAR);
             add_game_log(game, "blue_clear", player_index);
             DBG("blue clear p=%d", player_index + 1);
             break;
@@ -397,6 +410,7 @@ void game_check_collisions(GameState *game) {
                     player->alive = 0;
                 }
 
+                request_sound(game, SOUND_CRASH);
                 add_game_log(game, "crash", p);
                 DBG("crash p=%d lane=%d life=%d score=%d", p + 1, player->lane, player->life, player->score);
             }

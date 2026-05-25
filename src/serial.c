@@ -12,6 +12,7 @@
 //패킷 프로토콜 - 시작 바이트(0x12), 명령어, 인자1, 인자2, 종료 바이트(0x13)
 #define PACKET_START 0x12
 #define PACKET_END 0x13
+#define CMD_LED_SET 0x21
 #define CMD_M4_BUTTON 0x22
 #define CMD_FND_SET 0x23
 #define CMD_LCD_SET 0x24
@@ -176,6 +177,7 @@ static int read_m4_event(GameEvent *event) {
     int pressed;
 
     if (n < 0) return 0;
+    if (n != (ssize_t)sizeof(read_buf)) return 0;
 
     if (read_buf[1] != CMD_M4_BUTTON) return 0;
 
@@ -187,12 +189,22 @@ static int read_m4_event(GameEvent *event) {
     // '0'의 ASCII 값을 빼서 숫자 ID로 변환
     pressed = read_buf[3] - 0x30;
 
+    if (button_id >= 0 && button_id <= 4 && (pressed == 0 || pressed == 1)) {
+        (void)serial_send_led(button_id, pressed);
+    }
+
     return map_m4_button_event(button_id, pressed, event);
 }
 
 // 통신 닫음.
 void serial_close(void) {
     if (m4_uart_fd >= 0) {
+        int i;
+
+        for (i = 0; i < 5; i++) {
+            (void)serial_send_led(i, 0);
+        }
+
         close(m4_uart_fd);
         m4_uart_fd = -1;
     }
@@ -214,7 +226,7 @@ ssize_t serial_write(const void *buf, size_t len) {
 커맨드, 인자, 인자 채우면 패킷만듦. 패킷과 패킷길이를 위 함수에 호출하며 인자로 넘겨 씀. 패킷이 제대로 길이맞춰 쓰이면 0 반환.
 lcd) 0x24, 0x30, 0x30~33(0~3프리셋)
 fnd) 0x23, 0x30~32(자리), 0x30~39(0~9)
-led) 0x21, 0x30~34(LED 번호), 0x30~31(0,1)
+led) 0x21, 0x30~34(LED 번호), 0x30(OFF), 0x31(ON)
 */
 static int write_packet(unsigned char command, unsigned char arg1, unsigned char arg2) {
     unsigned char packet[5];
@@ -234,6 +246,19 @@ static int write_packet(unsigned char command, unsigned char arg1, unsigned char
 #else
     return 0;
 #endif
+}
+
+// M4 LED는 호출부 기준 1=ON, 0=OFF. 프로토콜도 0x31=ON, 0x30=OFF.
+int serial_send_led(int led_index, int state) {
+    if (led_index < 0) {
+        led_index = 0;
+    }
+
+    if (led_index > 4) {
+        led_index = 4;
+    }
+
+    return write_packet(CMD_LED_SET, led_index, state ? 1 : 0);
 }
 
 //2. lcd에 프리셋 입력해서 패킷 통신함.
