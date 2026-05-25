@@ -276,3 +276,40 @@ make sim
 
 ## 발표용 한 줄 요약
 본 프로젝트는 멀티스레드 환경에서 입력 생성과 상태 갱신을 분리하고, GameState를 main thread 단일 작성자로 제한해 race condition을 줄인 이벤트 기반 대전 레이싱 게임이다.
+==
+## 자동검증 — 순서, 검사항목, 검증범위 및 한계
+
+### 자동검증 순서 (내부 autotest / 수동 보드 동일 순서)
+- 빌드/실행: `make sim` → `./racing_game --autotest` (또는 `bash scripts/sim_autotest.sh`)
+- 자동(autotest) 시나리오(요약):
+  1. M4 start 버튼(id=2) 클릭 → LOGO 출력 확인
+  2. 강제 LOGO 출력 (검증용)
+  3. M4 이동 버튼 순차 클릭: id=0 (P1 left), id=1 (P1 right), id=3 (P2 left), id=4 (P2 right)
+  4. 강제 RED 출력 → Q6 BACK (P1 스킬) → `red_attack` 확인
+  5. 강제 GREEN 출력 → Q6 BACK 5회(스택 누적) → 아이템 만료 후 `green_heal` 확인
+  6. 강제 BLUE 출력 → Q6 BACK → `blue_clear` 확인
+  7. Q6 MENU (P2 스킬), Q6 HOME (PAUSE 토글) 동작 확인
+  8. 종료(quit) 및 모든 LED OFF / serial close 확인
+
+### 스크립트가 검사하는 항목 (핵심)
+- LCD 출력 존재: LOGO / RED / GREEN / BLUE (순서: LOGO → RED → GREEN → BLUE)
+- M4 버튼(id=0..4): press/release 패킷 및 대응 M4 LED ON/OFF 패킷
+- Q6 키: BACK(158)/HOME(172)/MENU(139) 각각 press/release 및 Q6 LED ON/OFF
+- FND 출력: `FND number=` 로그 존재 (점수 갱신 확인)
+- BUZZER 로그 존재
+- 로우 시리얼 패킷(특정 `packet=...` 문자열) 존재 확인
+- 게임 이벤트(`game_events.log`): `sim_force_item,0..3`, `red_attack,0`, `green_stack,0`(여러), `green_heal,0`, `blue_clear,0`
+- 디버그 로그(`game_debug.log`): `serial_event` / `hw_event` 로깅으로 입력 쓰레드→메인 경로 확인
+
+### 검증 범위 및 한계
+- 검증 범위:
+  - 입력 스레드 → EventQueue → main 처리 경로
+  - LCD / FND / LED / BUZZER 출력 시퀀스
+  - RED / GREEN / BLUE 아이템 동작(스택/회복/클리어)
+  - M4/Q6 이벤트 흐름(press→queue→main)
+- 한계:
+  - grep 기반 검사로는 미세한 타이밍 이슈나 희귀 race condition을 완전히 포착할 수 없음
+  - UI의 깜박임이나 ANSI 렌더링 미세 문제는 `run_stdout.log`의 수동 시각 검토가 필요
+  - 더 정밀한 타이밍 분석이 필요하면 타임스탬프 강화 로그/프로파일링 추가 필요
+
+(끝)
