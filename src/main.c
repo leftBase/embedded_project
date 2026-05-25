@@ -6,12 +6,10 @@
 #include "hardware.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <termios.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -24,67 +22,16 @@ static volatile int running = 1;
 #define RENDER_INTERVAL_TICKS 1
 #define FND_INTERVAL_TICKS 10
 
-static int use_serial = 1;
-
-//터미오스 tio, 키보드 초기화 여부, 원래 터미오스 플래그 저장
-static struct termios tio;
-static int original_stdin_flags = -1;
-static int keyboard_ready;
-
-//없어질 키보드 입력 초기화
-static void keyboard_init(void) {
-    struct termios raw;
-
-    if (tcgetattr(STDIN_FILENO, &tio) != 0) {
-        DBG("tcgetattr failed errno=%d", errno);
-        return;
-    }
-
-    // 원래 터미오스 설정을 raw 모드로 변경하여 키보드 입력을 비차단(non-blocking)으로 읽을 수 있도록 설정합니다. 이렇게 하면 getchar()나 read()가 키 입력이 없을 때 블록되지 않고 즉시 반환됩니다.
-    raw = tio;
-    raw.c_iflag &= ~(ICRNL | IXON);
-    raw.c_lflag &= ~(ICANON | ECHO);
-    raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 0;
-
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) {
-        DBG("tcsetattr failed errno=%d", errno);
-        return;
-    }
-
-    tcflush(STDIN_FILENO, TCIFLUSH);
-
-    //fcntl 함수를 사용하여 표준 입력(STDIN_FILENO)의 파일 상태 플래그를 가져오고, O_NONBLOCK 플래그를 추가하여 키보드 입력을 비차단 모드로 설정합니다. 이렇게 하면 키보드에서 입력이 없을 때 read() 함수가 즉시 반환되어 프로그램이 멈추지 않고 계속 실행될 수 있습니다.
-    original_stdin_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
-    if (original_stdin_flags >= 0) {
-        fcntl(STDIN_FILENO, F_SETFL, original_stdin_flags | O_NONBLOCK);
-    }
-
-    keyboard_ready = 1;
-}
-
-//키보드 입력 원상복구
-static void keyboard_close(void) {
-    if (!keyboard_ready) {
-        return;
-    }
-
-    tcsetattr(STDIN_FILENO, TCSANOW, &tio);
-
-    if (original_stdin_flags >= 0) {
-        fcntl(STDIN_FILENO, F_SETFL, original_stdin_flags);
-    }
-}
-
+//터미오스/키보드 관련 코드는 제거했습니다. 모든 입력은 하드웨어(serial/hw) 또는
+//시뮬레이터 autotest에서만 수신되도록 변경되어 있습니다.
 
 // ####타이머스레드####
-
 //tick_ms는 50. 50ms에 한번(20fps) 틱푸시하는 주기 스레드
 static void* timer_thread(void* arg) {
     (void)arg;
 
     while (running) {
-        usleep(TICK_MS * 1000); 
+        usleep(TICK_MS * 1000);
         queue_push(&g_queue, EV_TICK, 0);
     }
 
@@ -92,66 +39,7 @@ static void* timer_thread(void* arg) {
 }
 
 
-// ####키보드스레드####
-
-//a, d, q는 p1의 좌우 스킬
-//s는 스타트, p는 일시정지
-//j, l, o는 p2의 좌우 스킬, x는 종료
-static void* keyboard_thread(void* arg) {
-    (void)arg;
-
-    while (running) {
-        unsigned char c;
-        ssize_t n = read(STDIN_FILENO, &c, 1);
-
-        if (n <= 0) {
-            if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-                DBG("keyboard read error errno=%d", errno);
-            }
-            usleep(5000);
-            continue;
-        }
-
-        switch (c) {
-            case 'a':
-                queue_push(&g_queue, EV_P1_LEFT, 1);
-                break;
-            case 'd':
-                queue_push(&g_queue, EV_P1_RIGHT, 1);
-                break;
-            case 'q':
-                queue_push(&g_queue, EV_P1_SKILL, 1);
-                break;
-            case 's':
-                queue_push(&g_queue, EV_START, 1);
-                break;
-            case 'p':
-                queue_push(&g_queue, EV_PAUSE, 1);
-                break;
-            case 'j':
-                queue_push(&g_queue, EV_P2_LEFT, 1);
-                break;
-            case 'l':
-                queue_push(&g_queue, EV_P2_RIGHT, 1);
-                break;
-            case 'o':
-                queue_push(&g_queue, EV_P2_SKILL, 1);
-                break;
-            case 'x':
-            case 'X':
-                queue_push(&g_queue, EV_QUIT, 1);
-                break;
-            default:
-                break;
-        }
-    }
-
-    return NULL;
-}
-
-
 // ####시리얼스레드####
-
 // 다음 GameEvent를 EventQueue에 푸시 serial_next_event가 m4의 입력을 감시한걸 사용
 static void* serial_thread(void* arg) {
     (void)arg; // 인자 사용 안 함
@@ -174,7 +62,6 @@ static void* serial_thread(void* arg) {
 
 
 // ####하드웨어스레드####
-
 // 하드웨어(Q6) 전용 스레드: hw_next_event로부터 이벤트를 받아 큐로 푸시
 static void* hw_thread(void* arg) {
     (void)arg; // 인자 사용 안 함
@@ -244,6 +131,10 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
         }
     }
 
+    if (game->state != GAME_RUNNING) {
+        return;
+    }
+
     //2. fnd는 플레이어1,2 점수 번갈아가면서 보내기. 10틱마다 보내도록. 실패하면 로그에 남기기.
     fnd_ticks++;
     if (fnd_ticks < FND_INTERVAL_TICKS) {
@@ -263,55 +154,101 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
     // M4 입력 LED는 serial read 쪽에서 버튼 press/release에 맞춰 바로 갱신한다.
 }
 
+
 // ####메인루프####
 
 // 게임 초기화, 스레드 생성, 이벤트 처리 루프, 종료시 정리
 int main(int argc, char **argv) {
-    //chat **argv == char *argv[]: 명령행 인자 배열. argv[0]는 프로그램 이름, argv[1]부터는 실제 인자들. argc는 인자 개수.
-    //타이머, 키보드, 시리얼, 하드웨어 스레드 생성. 시리얼, 하드웨어는 초기화 성공시에만.
-    pthread_t keyboard;
+    // 타이머, 시리얼, 하드웨어 스레드 생성. 시리얼, 하드웨어는 초기화 성공시에만.
     pthread_t serial;
     pthread_t hw;
     pthread_t timer;
+#ifdef SIMULATOR
+    pthread_t autotest;
+#endif
     int serial_enabled;
     int hw_enabled;
+#ifdef SIMULATOR
+    int autotest_started = 0;
+#endif
     int render_tick_count = 0;
     int need_render = 1;
 
-    //난수 시드, 디버그 초기화, 게임 초기화, 키보드 초기화, 렌더 초기화
+#ifdef SIMULATOR
+    simulator_autotest = 1;
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--autotest") == 0) {
+            simulator_autotest = 1;
+        } else if (strcmp(argv[i], "--manual") == 0) {
+            simulator_autotest = 0;
+        }
+    }
+#else
+    simulator_autotest = 0;
     (void)argc;
     (void)argv;
+#endif
 
+    //난수 시드, 디버그 초기화, 게임 초기화, 렌더 초기화
     srand((unsigned int)time(NULL));
     debug_init(getenv("GAME_DEBUG"));
-    DBG("program start use_serial=%d", use_serial);
+#ifdef SIMULATOR
+    DBG("program start simulator=1 autotest=%d", simulator_autotest);
+#else
+    DBG("program start simulator=0 autotest=%d", simulator_autotest);
+#endif
 
-    //이벤트큐 초기화, 게임상태 초기화, 키보드 초기화, 렌더 초기화
+    //이벤트큐 초기화, 게임상태 초기화, 렌더 초기화
     queue_init(&g_queue);
     game_init(&g_game);
-    keyboard_init();
     render_init();
 
-    //타이머, 키보드 스레드 생성
+    //타이머 스레드 생성
     pthread_create(&timer, NULL, timer_thread, NULL);
-    pthread_create(&keyboard, NULL, keyboard_thread, NULL);
 
     // 초기화 성공시 하드웨어, 시리얼 스레드 생성
     hw_enabled = hw_init() == 0;
+#ifndef SIMULATOR
     if (hw_enabled) {
         pthread_create(&hw, NULL, hw_thread, NULL);
         DBG("hardware thread enabled");
     } else {
         DBG("hardware init failed or not present");
     }
+#else
+    if (hw_enabled) {
+        pthread_create(&hw, NULL, hw_thread, NULL);
+        DBG("hardware simulator thread enabled");
+    } else {
+        DBG("hardware simulator init failed");
+    }
+#endif
 
     serial_enabled = m4_uart_init() == 0;
+#ifndef SIMULATOR
     if (serial_enabled) {
         pthread_create(&serial, NULL, serial_thread, NULL);
         DBG("serial thread enabled");
-    } else if (use_serial) {
+    } else {
         DBG("serial init failed errno=%d", errno);
     }
+#else
+    if (serial_enabled) {
+        pthread_create(&serial, NULL, serial_thread, NULL);
+        DBG("serial simulator thread enabled");
+    } else {
+        DBG("serial simulator init failed errno=%d", errno);
+    }
+#endif
+
+#ifdef SIMULATOR
+    if (simulator_autotest) {
+        pthread_create(&autotest, NULL, autotest_thread, NULL);
+        autotest_started = 1;
+        DBG("simulator autotest thread enabled");
+    }
+#endif
 
     //메인 루프: 이벤트 큐에서 이벤트 읽어서 게임에 적용. 틱 이벤트면 보드 업데이트, 렌더링 주기 체크해서 렌더링. 그 외 이벤트면 렌더링 필요 플래그 세움.
     while (running) {
@@ -353,7 +290,7 @@ int main(int argc, char **argv) {
 // 1. 전역 러닝 플래그 내림
     running = 0;
 
-    // 2. [추천 피드백] 큐 장부를 폐쇄하고 대기실에 갇힌 녀석들을 확 깨워 탈출시킴
+    // 2. 큐 장부를 폐쇄
     queue_close(&g_queue);
 
     // 3. 디바이스 파일 디스크립터들 먼저 닫기 (블로킹 I/O 강제 리턴 유도)
@@ -362,14 +299,17 @@ int main(int argc, char **argv) {
 
     // 4. 모든 보조 쓰레드가 깔끔하게 정돈되어 죽을 때까지 대기 및 자원 수거
     pthread_join(timer, NULL);
-    pthread_join(keyboard, NULL);
+#ifdef SIMULATOR
+    if (autotest_started) {
+        pthread_join(autotest, NULL);
+    }
+#endif
     if (hw_enabled) pthread_join(hw, NULL);
     if (serial_enabled) pthread_join(serial, NULL);
 
     // 5. 최종 메모리 및 로그 백업 정리
     save_game_log(g_game.logs);
     render_shutdown();
-    keyboard_close();
     debug_close();
 
     return 0;
