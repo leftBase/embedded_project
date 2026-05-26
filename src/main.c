@@ -20,7 +20,7 @@ static volatile int running = 1;
 static int simulator_autotest = 0; // 시뮬레이터에서 autotest 모드인지 여부. --autotest 커맨드라인 옵션으로 제어.
 
 //GUI, fnd 틱 10
-#define RENDER_INTERVAL_TICKS 1
+#define RENDER_INTERVAL_TICKS 4
 #define FND_INTERVAL_TICKS 10
 
 //터미오스/키보드 관련 코드는 제거했습니다. 모든 입력은 하드웨어(serial/hw) 또는
