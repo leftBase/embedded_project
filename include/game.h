@@ -45,12 +45,12 @@ typedef enum {
     GAME_OVER
 } GameMode;
 
-//lcd 프리셋: 로고, RGB
+//lcd 프리셋: M4 LCD arg2 0=RED, 1=GREEN, 2=BLUE, 3=LOGO
 typedef enum {
-    LCD_LOGO = 0,
-    LCD_RED = 1,
-    LCD_GREEN = 2,
-    LCD_BLUE = 3
+    LCD_RED = 0,
+    LCD_GREEN = 1,
+    LCD_BLUE = 2,
+    LCD_LOGO = 3
 } LcdPreset;
 
 typedef enum {
@@ -59,8 +59,10 @@ typedef enum {
     SOUND_ITEM,
     SOUND_ATTACK,
     SOUND_HEAL,
-    SOUND_CLEAR,
-    SOUND_GAME_OVER
+    SOUND_P1_LEFT,
+    SOUND_P1_RIGHT,
+    SOUND_P2_LEFT,
+    SOUND_P2_RIGHT
 } SoundType;
 
 //플레이어 구조체

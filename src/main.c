@@ -20,7 +20,7 @@ static volatile int running = 1;
 static int simulator_autotest = 0; // 시뮬레이터에서 autotest 모드인지 여부. --autotest 커맨드라인 옵션으로 제어.
 
 //GUI, fnd 틱 10
-#define RENDER_INTERVAL_TICKS 4
+#define RENDER_INTERVAL_TICKS 10
 #define FND_INTERVAL_TICKS 10
 #define SOUND_QUEUE_SIZE 8
 
@@ -132,10 +132,14 @@ static void sound_queue_destroy(SoundQueue *q) {
     pthread_cond_destroy(&q->not_empty);
 }
 
-static void sound_queue_push(SoundQueue *q, double freq, int time_us) {
+static void sound_queue_push(SoundQueue *q, double freq, int time_us, int clear_pending) {
     pthread_mutex_lock(&q->lock);
 
     if (!q->closed) {
+        if (clear_pending) {
+            q->head = q->tail;
+        }
+
         if (sound_queue_is_full(q)) {
             q->head = sound_queue_next_index(q->head);
         }
@@ -171,27 +175,42 @@ static int sound_queue_pop(SoundQueue *q, SoundRequest *request) {
 static void queue_sound(SoundType sound) {
     switch (sound) {
         case SOUND_CRASH:
-            sound_queue_push(&g_sound_queue, 196.0, 70000);
+            sound_queue_push(&g_sound_queue, 196.0, 70000, 1);
             break;
         case SOUND_ITEM:
-            sound_queue_push(&g_sound_queue, 659.0, 60000);
+            sound_queue_push(&g_sound_queue, 659.0, 60000, 1);
             break;
         case SOUND_ATTACK:
-            sound_queue_push(&g_sound_queue, 523.0, 60000);
+            sound_queue_push(&g_sound_queue, 523.0, 60000, 1);
             break;
         case SOUND_HEAL:
-            sound_queue_push(&g_sound_queue, 784.0, 70000);
+            sound_queue_push(&g_sound_queue, 784.0, 70000, 1);
             break;
-        case SOUND_CLEAR:
-            sound_queue_push(&g_sound_queue, 880.0, 70000);
+        case SOUND_P1_LEFT:
+            sound_queue_push(&g_sound_queue, 440.0, 25000, 0);
             break;
-        case SOUND_GAME_OVER:
-            sound_queue_push(&g_sound_queue, 262.0, 120000);
+        case SOUND_P1_RIGHT:
+            sound_queue_push(&g_sound_queue, 494.0, 25000, 0);
+            break;
+        case SOUND_P2_LEFT:
+            sound_queue_push(&g_sound_queue, 587.0, 25000, 0);
+            break;
+        case SOUND_P2_RIGHT:
+            sound_queue_push(&g_sound_queue, 698.0, 25000, 0);
             break;
         case SOUND_NONE:
         default:
             break;
     }
+}
+
+static void dispatch_pending_sound(const GameState *game, int *last_sound_seq) {
+    if (game->sound_seq == *last_sound_seq) {
+        return;
+    }
+
+    *last_sound_seq = game->sound_seq;
+    queue_sound(game->sound);
 }
 
 static void* sound_thread(void* arg) {
@@ -208,14 +227,8 @@ static void* sound_thread(void* arg) {
 // buzzer, fnd, lcd 업데이트. M4/Q6 입력 LED는 입력 수신 위치에서 처리한다.
 static void update_board_outputs(int serial_enabled, const GameState *game) {
     static int last_lcd = -1;
-    static int last_sound_seq;
     static int fnd_ticks;
     static int fnd_player;
-
-    if (game->sound_seq != last_sound_seq) {
-        last_sound_seq = game->sound_seq;
-        queue_sound(game->sound);
-    }
 
     if (!serial_enabled) {
         return;
@@ -273,6 +286,7 @@ int main(int argc, char **argv) {
 #endif
     int render_tick_count = 0;
     int need_render = 1;
+    int last_sound_seq = 0;
 
 #ifdef SIMULATOR
     simulator_autotest = 1;
@@ -372,6 +386,7 @@ int main(int argc, char **argv) {
 
         //EV_QUIT, EV_TICK 아니면 로그 쓰고 이벤트 적용.
         game_apply_event(&g_game, ev);
+        dispatch_pending_sound(&g_game, &last_sound_seq);
 
         //EV_TICK이면 보드 업데이트(fnd, lcd, led, buzzer)
         if (ev.type == EV_TICK) {

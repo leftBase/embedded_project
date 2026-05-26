@@ -22,10 +22,10 @@ typedef enum {
 } EventType;
 
 typedef enum {
-    ITEM_NONE = 0,
     ITEM_RED,
     ITEM_GREEN,
-    ITEM_BLUE
+    ITEM_BLUE,
+    ITEM_NONE
 } ItemType;
 
 typedef struct {

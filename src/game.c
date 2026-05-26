@@ -266,7 +266,6 @@ static void check_game_over(GameState *game) {
         game->winner = PLAYER_2;
     }
 
-    request_sound(game, SOUND_GAME_OVER);
     add_game_log(game, "game_over", game->winner);
     DBG("game over winner=%d", game->winner);
 }
@@ -278,6 +277,21 @@ static void game_start(GameState *game) {
     game->state = GAME_RUNNING;
     add_game_log(game, "start", 0);
     DBG("game start");
+}
+
+static void game_move_player_with_sound(GameState *game, int player_index, int direction, SoundType sound) {
+    int old_lane;
+
+    if (player_index < 0 || player_index >= PLAYER_COUNT) {
+        return;
+    }
+
+    old_lane = game->players[player_index].lane;
+    game_move_player(game, player_index, direction);
+
+    if (game->players[player_index].lane != old_lane) {
+        request_sound(game, sound);
+    }
 }
 
 //게임초기화
@@ -363,7 +377,6 @@ void game_use_item(GameState *game, int player_index) {
             game->item = ITEM_NONE;
             game->item_timer = 0;
             player->score += SCORE_ITEM_SUCCESS;
-            request_sound(game, SOUND_CLEAR);
             add_game_log(game, "blue_clear", player_index);
             DBG("blue clear p=%d", player_index + 1);
             break;
@@ -459,14 +472,14 @@ void game_apply_event(GameState *game, GameEvent ev) {
 
         case EV_P1_LEFT:
             if (game->state == GAME_RUNNING) {
-                game_move_player(game, PLAYER_1, -1);
+                game_move_player_with_sound(game, PLAYER_1, -1, SOUND_P1_LEFT);
                 DBG("move p=1 lane=%d", game->players[PLAYER_1].lane);
             }
             break;
 
         case EV_P1_RIGHT:
             if (game->state == GAME_RUNNING) {
-                game_move_player(game, PLAYER_1, 1);
+                game_move_player_with_sound(game, PLAYER_1, 1, SOUND_P1_RIGHT);
                 DBG("move p=1 lane=%d", game->players[PLAYER_1].lane);
             }
             break;
@@ -479,14 +492,14 @@ void game_apply_event(GameState *game, GameEvent ev) {
 
         case EV_P2_LEFT:
             if (game->state == GAME_RUNNING) {
-                game_move_player(game, PLAYER_2, -1);
+                game_move_player_with_sound(game, PLAYER_2, -1, SOUND_P2_LEFT);
                 DBG("move p=2 lane=%d", game->players[PLAYER_2].lane);
             }
             break;
 
         case EV_P2_RIGHT:
             if (game->state == GAME_RUNNING) {
-                game_move_player(game, PLAYER_2, 1);
+                game_move_player_with_sound(game, PLAYER_2, 1, SOUND_P2_RIGHT);
                 DBG("move p=2 lane=%d", game->players[PLAYER_2].lane);
             }
             break;
