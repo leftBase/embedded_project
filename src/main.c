@@ -9,7 +9,6 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -17,7 +16,6 @@
 static EventQueue g_queue;
 static GameState g_game;
 static volatile int running = 1;
-static int simulator_autotest = 0; // 시뮬레이터에서 autotest 모드인지 여부. --autotest 커맨드라인 옵션으로 제어.
 
 //GUI, fnd 틱 10
 #define RENDER_INTERVAL_TICKS 10
@@ -40,8 +38,7 @@ typedef struct {
 
 static SoundQueue g_sound_queue;
 
-//터미오스/키보드 관련 코드는 제거했습니다. 모든 입력은 하드웨어(serial/hw) 또는
-//시뮬레이터 autotest에서만 수신되도록 변경되어 있습니다.
+// 모든 입력은 하드웨어(serial/hw)에서만 수신한다.
 
 // ####타이머스레드####
 //tick_ms는 50. 50ms에 한번(20fps) 틱푸시하는 주기 스레드
@@ -175,7 +172,8 @@ static int sound_queue_pop(SoundQueue *q, SoundRequest *request) {
 static void queue_sound(SoundType sound) {
     switch (sound) {
         case SOUND_CRASH:
-            sound_queue_push(&g_sound_queue, 196.0, 70000, 1);
+            sound_queue_push(&g_sound_queue, 147.0, 45000, 1);
+            sound_queue_push(&g_sound_queue, 98.0, 55000, 0);
             break;
         case SOUND_ITEM:
             sound_queue_push(&g_sound_queue, 659.0, 60000, 1);
@@ -186,17 +184,21 @@ static void queue_sound(SoundType sound) {
         case SOUND_HEAL:
             sound_queue_push(&g_sound_queue, 784.0, 70000, 1);
             break;
+        case SOUND_CLEAR:
+            sound_queue_push(&g_sound_queue, 659.0, 25000, 1);
+            sound_queue_push(&g_sound_queue, 988.0, 55000, 0);
+            break;
         case SOUND_P1_LEFT:
-            sound_queue_push(&g_sound_queue, 440.0, 25000, 0);
+            sound_queue_push(&g_sound_queue, 330.0, 22000, 0);
             break;
         case SOUND_P1_RIGHT:
-            sound_queue_push(&g_sound_queue, 494.0, 25000, 0);
+            sound_queue_push(&g_sound_queue, 392.0, 22000, 0);
             break;
         case SOUND_P2_LEFT:
-            sound_queue_push(&g_sound_queue, 587.0, 25000, 0);
+            sound_queue_push(&g_sound_queue, 494.0, 22000, 0);
             break;
         case SOUND_P2_RIGHT:
-            sound_queue_push(&g_sound_queue, 698.0, 25000, 0);
+            sound_queue_push(&g_sound_queue, 587.0, 22000, 0);
             break;
         case SOUND_NONE:
         default:
@@ -270,48 +272,22 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
 // ####메인루프####
 
 // 게임 초기화, 스레드 생성, 이벤트 처리 루프, 종료시 정리
-int main(int argc, char **argv) {
+int main(void) {
     // 타이머, 시리얼, 하드웨어 스레드 생성. 시리얼, 하드웨어는 초기화 성공시에만.
     pthread_t serial;
     pthread_t hw;
     pthread_t timer;
     pthread_t sound;
-#ifdef SIMULATOR
-    pthread_t autotest;
-#endif
     int serial_enabled;
     int hw_enabled;
-#ifdef SIMULATOR
-    int autotest_started = 0;
-#endif
     int render_tick_count = 0;
     int need_render = 1;
     int last_sound_seq = 0;
 
-#ifdef SIMULATOR
-    simulator_autotest = 1;
-
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--autotest") == 0) {
-            simulator_autotest = 1;
-        } else if (strcmp(argv[i], "--manual") == 0) {
-            simulator_autotest = 0;
-        }
-    }
-#else
-    simulator_autotest = 0;
-    (void)argc;
-    (void)argv;
-#endif
-
     //난수 시드, 디버그 초기화, 게임 초기화, 렌더 초기화
     srand((unsigned int)time(NULL));
     debug_init(getenv("GAME_DEBUG"));
-#ifdef SIMULATOR
-    DBG("program start simulator=1 autotest=%d", simulator_autotest);
-#else
-    DBG("program start simulator=0 autotest=%d", simulator_autotest);
-#endif
+    DBG("program start");
 
     //이벤트큐 초기화, 게임상태 초기화, 렌더 초기화
     queue_init(&g_queue);
@@ -325,46 +301,20 @@ int main(int argc, char **argv) {
 
     // 초기화 성공시 하드웨어, 시리얼 스레드 생성
     hw_enabled = hw_init() == 0;
-#ifndef SIMULATOR
     if (hw_enabled) {
         pthread_create(&hw, NULL, hw_thread, NULL);
         DBG("hardware thread enabled");
     } else {
         DBG("hardware init failed or not present");
     }
-#else
-    if (hw_enabled) {
-        pthread_create(&hw, NULL, hw_thread, NULL);
-        DBG("hardware simulator thread enabled");
-    } else {
-        DBG("hardware simulator init failed");
-    }
-#endif
 
     serial_enabled = m4_uart_init() == 0;
-#ifndef SIMULATOR
     if (serial_enabled) {
         pthread_create(&serial, NULL, serial_thread, NULL);
         DBG("serial thread enabled");
     } else {
         DBG("serial init failed errno=%d", errno);
     }
-#else
-    if (serial_enabled) {
-        pthread_create(&serial, NULL, serial_thread, NULL);
-        DBG("serial simulator thread enabled");
-    } else {
-        DBG("serial simulator init failed errno=%d", errno);
-    }
-#endif
-
-#ifdef SIMULATOR
-    if (simulator_autotest) {
-        pthread_create(&autotest, NULL, autotest_thread, NULL);
-        autotest_started = 1;
-        DBG("simulator autotest thread enabled");
-    }
-#endif
 
     //메인 루프: 이벤트 큐에서 이벤트 읽어서 게임에 적용. 틱 이벤트면 보드 업데이트, 렌더링 주기 체크해서 렌더링. 그 외 이벤트면 렌더링 필요 플래그 세움.
     while (running) {
@@ -420,11 +370,6 @@ int main(int argc, char **argv) {
     if (hw_enabled) hw_close();
 
     // 5. 모든 보조 쓰레드가 깔끔하게 정돈되어 죽을 때까지 대기 및 자원 수거
-#ifdef SIMULATOR
-    if (autotest_started) {
-        pthread_join(autotest, NULL);
-    }
-#endif
     if (hw_enabled) pthread_join(hw, NULL);
     if (serial_enabled) pthread_join(serial, NULL);
 

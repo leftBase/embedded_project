@@ -59,6 +59,7 @@ typedef enum {
     SOUND_ITEM,
     SOUND_ATTACK,
     SOUND_HEAL,
+    SOUND_CLEAR,
     SOUND_P1_LEFT,
     SOUND_P1_RIGHT,
     SOUND_P2_LEFT,

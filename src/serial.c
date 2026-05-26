@@ -23,81 +23,6 @@ static int m4_uart_fd = -1;
 //버퍼 선언
 char read_buf[5];
 
-/* --- ACK 설정 및 스위치 --- 실은 필요없음. */
-#define SERIAL_USE_ACK 0  // 0: 끄기 (렉 없음), 1: 켜기
-#define CMD_ACK 0x7E
-#define ACK_TIMEOUT_MS 50
-
-#if SERIAL_USE_ACK
-
-/* timeout(ms) 안에 5바이트 패킷 1개 읽기 (내부 도우미) */
-static int read_packet_with_timeout(unsigned char packet[5], int timeout_ms) {
-    fd_set rfds;
-    struct timeval tv;
-    int ready;
-    ssize_t n;
-
-    if (m4_uart_fd < 0) {
-        errno = EBADF;
-        return -1;
-    }
-
-    FD_ZERO(&rfds);
-    FD_SET(m4_uart_fd, &rfds);
-
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-
-    ready = select(m4_uart_fd + 1, &rfds, NULL, NULL, &tv);
-    if (ready < 0) {
-        return (errno == EINTR) ? 0 : -1;
-    }
-    if (ready == 0) {
-        errno = ETIMEDOUT;
-        return -1;
-    }
-
-    n = read(m4_uart_fd, packet, 5);
-    if (n < 0) {
-        return (errno == EINTR) ? 0 : -1;
-    }
-    if (n != 5) {
-        return 0;
-    }
-
-    if (packet[0] != PACKET_START || packet[4] != PACKET_END) {
-        return 0;
-    }
-
-    return 1;
-}
-
-
-/* ACK 패킷 검증 및 3회 재시도 함수 */
-static int wait_ack_for_packet(unsigned char cmd, unsigned char arg1, unsigned char arg2) {
-    unsigned char p[5];
-    int retry;
-
-    (void)arg2; /* 현재 예시는 arg1 기반 ACK 검사 */
-
-    for (retry = 0; retry < 3; ++retry) {
-        int r = read_packet_with_timeout(p, ACK_TIMEOUT_MS);
-        if (r < 0) return -1;
-        if (r == 0) continue;
-
-        if (p[1] == CMD_ACK && p[2] == cmd && p[3] == (unsigned char)('0' + arg1)) {
-            return 0;
-        }
-        /* ACK 외 패킷이면 무시하고 계속 대기 */
-    }
-
-    errno = ETIMEDOUT;
-    return -1;
-}
-
-#endif
-
-
 // 프로그램 오류 발생 시 디버깅 함수
 int panic() {
     printf("[Panic] %i: %s\n", errno, strerror(errno));
@@ -240,12 +165,6 @@ static int write_packet(unsigned char command, unsigned char arg1, unsigned char
 
     n = serial_write(packet, sizeof(packet));
     return n == (ssize_t)sizeof(packet) ? 0 : -1;
-
-#if SERIAL_USE_ACK
-    return wait_ack_for_packet(command, arg1, arg2);
-#else
-    return 0;
-#endif
 }
 
 // M4 LED는 호출부 기준 1=ON, 0=OFF. 프로토콜도 0x31=ON, 0x30=OFF.

@@ -377,6 +377,7 @@ void game_use_item(GameState *game, int player_index) {
             game->item = ITEM_NONE;
             game->item_timer = 0;
             player->score += SCORE_ITEM_SUCCESS;
+            request_sound(game, SOUND_CLEAR);
             add_game_log(game, "blue_clear", player_index);
             DBG("blue clear p=%d", player_index + 1);
             break;

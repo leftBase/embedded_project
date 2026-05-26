@@ -1,5 +1,6 @@
 CC ?= gcc
 TARGET ?= racing_game
+RUN_TTY ?= /dev/tty0
 
 SRC_DIR := src
 INC_DIR := include
@@ -12,7 +13,7 @@ CFLAGS ?= -Wall -Wextra -std=c99 -D_DEFAULT_SOURCE -DENABLE_DEBUG_LOG
 LDFLAGS ?= -pthread
 LDLIBS ?=
 
-.PHONY: all clean
+.PHONY: all clean run
 
 all: $(TARGET)
 
@@ -24,3 +25,6 @@ $(TARGET): $(OBJS)
 
 clean:
 	rm -f $(OBJS) $(TARGET)
+
+run: $(TARGET)
+	GAME_DEBUG=0 ./$(TARGET) > $(RUN_TTY)
