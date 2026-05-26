@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#inclu
 
 // 레인 한계넘으면 그냥 레인에 있게 함.
 static int clamp_lane(int lane) {
@@ -503,53 +502,4 @@ void game_apply_event(GameState *game, GameEvent ev) {
         default:
             break;
     }
-}
-
-//게임로그 저장
-/*void save_game_log(GameLog logs[]) {
-    FILE *fp = fopen("game_events.log", "w");
-    int i;
-
-    if (fp == NULL) {
-        return;
-    }
-
-    for (i = 0; i < 100; i++) {
-        if (logs[i].event != NULL) {
-            fprintf(fp, "%ld,%s,%d\n", logs[i].timestamp, logs[i].event, logs[i].value);
-        }
-    }
-
-    fclose(fp);
-}*/
-void save_game_log(GameLog logs[]) {
-    FILE *fp = fopen("game_events.log", "w");
-    int i;
-    int saved_count = 0;
-
-    // 테라텀에 즉시 진입 알림
-    printf("\n[보드] 100개 규격 로그 저장 시작...\n");
-    fflush(stdout); 
-
-    if (fp == NULL) {
-        printf("[에러] 파일 생성 실패: %s\n", strerror(errno));
-        fflush(stdout);
-        return;
-    }
-
-    // 원래 스펙인 100개 루프로 원상복구
-    for (i = 0; i < 100; i++) {
-        // 포인터가 유효한 진짜 데이터만 필터링
-        if (logs[i].event != NULL) {
-            fprintf(fp, "%ld,%s,%d\n", logs[i].timestamp, logs[i].event, logs[i].value);
-            saved_count++;
-        }
-    }
-
-    fflush(fp); 
-    fclose(fp);
-
-    // 테라텀으로 결과 전송
-    printf("[성공] 총 %d개의 게임 로그가 /tmp/game_events.log 에 저장 완료!\n", saved_count);
-    fflush(stdout); 
 }

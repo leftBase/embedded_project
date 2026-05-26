@@ -22,6 +22,23 @@ static int simulator_autotest = 0; // 시뮬레이터에서 autotest 모드인�
 //GUI, fnd 틱 10
 #define RENDER_INTERVAL_TICKS 4
 #define FND_INTERVAL_TICKS 10
+#define SOUND_QUEUE_SIZE 8
+
+typedef struct {
+    double freq;
+    int time_us;
+} SoundRequest;
+
+typedef struct {
+    SoundRequest buffer[SOUND_QUEUE_SIZE];
+    int head;
+    int tail;
+    int closed;
+    pthread_mutex_t lock;
+    pthread_cond_t not_empty;
+} SoundQueue;
+
+static SoundQueue g_sound_queue;
 
 //터미오스/키보드 관련 코드는 제거했습니다. 모든 입력은 하드웨어(serial/hw) 또는
 //시뮬레이터 autotest에서만 수신되도록 변경되어 있습니다.
@@ -83,6 +100,110 @@ static void* hw_thread(void* arg) {
     return NULL;
 }
 
+static int sound_queue_next_index(int index) {
+    return (index + 1) % SOUND_QUEUE_SIZE;
+}
+
+static int sound_queue_is_empty(const SoundQueue *q) {
+    return q->head == q->tail;
+}
+
+static int sound_queue_is_full(const SoundQueue *q) {
+    return sound_queue_next_index(q->tail) == q->head;
+}
+
+static void sound_queue_init(SoundQueue *q) {
+    q->head = 0;
+    q->tail = 0;
+    q->closed = 0;
+    pthread_mutex_init(&q->lock, NULL);
+    pthread_cond_init(&q->not_empty, NULL);
+}
+
+static void sound_queue_close(SoundQueue *q) {
+    pthread_mutex_lock(&q->lock);
+    q->closed = 1;
+    pthread_cond_broadcast(&q->not_empty);
+    pthread_mutex_unlock(&q->lock);
+}
+
+static void sound_queue_destroy(SoundQueue *q) {
+    pthread_mutex_destroy(&q->lock);
+    pthread_cond_destroy(&q->not_empty);
+}
+
+static void sound_queue_push(SoundQueue *q, double freq, int time_us) {
+    pthread_mutex_lock(&q->lock);
+
+    if (!q->closed) {
+        if (sound_queue_is_full(q)) {
+            q->head = sound_queue_next_index(q->head);
+        }
+
+        q->buffer[q->tail].freq = freq;
+        q->buffer[q->tail].time_us = time_us;
+        q->tail = sound_queue_next_index(q->tail);
+        pthread_cond_signal(&q->not_empty);
+    }
+
+    pthread_mutex_unlock(&q->lock);
+}
+
+static int sound_queue_pop(SoundQueue *q, SoundRequest *request) {
+    pthread_mutex_lock(&q->lock);
+
+    while (sound_queue_is_empty(q) && !q->closed) {
+        pthread_cond_wait(&q->not_empty, &q->lock);
+    }
+
+    if (sound_queue_is_empty(q) && q->closed) {
+        pthread_mutex_unlock(&q->lock);
+        return 0;
+    }
+
+    *request = q->buffer[q->head];
+    q->head = sound_queue_next_index(q->head);
+
+    pthread_mutex_unlock(&q->lock);
+    return 1;
+}
+
+static void queue_sound(SoundType sound) {
+    switch (sound) {
+        case SOUND_CRASH:
+            sound_queue_push(&g_sound_queue, 196.0, 70000);
+            break;
+        case SOUND_ITEM:
+            sound_queue_push(&g_sound_queue, 659.0, 60000);
+            break;
+        case SOUND_ATTACK:
+            sound_queue_push(&g_sound_queue, 523.0, 60000);
+            break;
+        case SOUND_HEAL:
+            sound_queue_push(&g_sound_queue, 784.0, 70000);
+            break;
+        case SOUND_CLEAR:
+            sound_queue_push(&g_sound_queue, 880.0, 70000);
+            break;
+        case SOUND_GAME_OVER:
+            sound_queue_push(&g_sound_queue, 262.0, 120000);
+            break;
+        case SOUND_NONE:
+        default:
+            break;
+    }
+}
+
+static void* sound_thread(void* arg) {
+    SoundQueue *q = (SoundQueue *)arg;
+    SoundRequest request;
+
+    while (sound_queue_pop(q, &request)) {
+        buzzer_play(request.freq, request.time_us);
+    }
+
+    return NULL;
+}
 
 // buzzer, fnd, lcd 업데이트. M4/Q6 입력 LED는 입력 수신 위치에서 처리한다.
 static void update_board_outputs(int serial_enabled, const GameState *game) {
@@ -93,30 +214,7 @@ static void update_board_outputs(int serial_enabled, const GameState *game) {
 
     if (game->sound_seq != last_sound_seq) {
         last_sound_seq = game->sound_seq;
-
-        switch (game->sound) {
-            case SOUND_CRASH:
-                buzzer_play(196.0, 70000);
-                break;
-            case SOUND_ITEM:
-                buzzer_play(659.0, 60000);
-                break;
-            case SOUND_ATTACK:
-                buzzer_play(523.0, 60000);
-                break;
-            case SOUND_HEAL:
-                buzzer_play(784.0, 70000);
-                break;
-            case SOUND_CLEAR:
-                buzzer_play(880.0, 70000);
-                break;
-            case SOUND_GAME_OVER:
-                buzzer_play(262.0, 120000);
-                break;
-            case SOUND_NONE:
-            default:
-                break;
-        }
+        queue_sound(game->sound);
     }
 
     if (!serial_enabled) {
@@ -164,6 +262,7 @@ int main(int argc, char **argv) {
     pthread_t serial;
     pthread_t hw;
     pthread_t timer;
+    pthread_t sound;
 #ifdef SIMULATOR
     pthread_t autotest;
 #endif
@@ -204,9 +303,11 @@ int main(int argc, char **argv) {
     queue_init(&g_queue);
     game_init(&g_game);
     render_init();
+    sound_queue_init(&g_sound_queue);
 
     //타이머 스레드 생성
     pthread_create(&timer, NULL, timer_thread, NULL);
+    pthread_create(&sound, NULL, sound_thread, &g_sound_queue);
 
     // 초기화 성공시 하드웨어, 시리얼 스레드 생성
     hw_enabled = hw_init() == 0;
@@ -288,18 +389,22 @@ int main(int argc, char **argv) {
         }
     }
 
-// 1. 전역 러닝 플래그 내림
+    // 1. 전역 러닝 플래그 내림
     running = 0;
 
     // 2. 큐 장부를 폐쇄
     queue_close(&g_queue);
+    sound_queue_close(&g_sound_queue);
 
-    // 3. 디바이스 파일 디스크립터들 먼저 닫기 (블로킹 I/O 강제 리턴 유도)
+    // 3. 사운드 쓰레드 먼저 정리한다. 버저 fd가 닫히는 중에 재생하지 않게 하기 위함.
+    pthread_join(timer, NULL);
+    pthread_join(sound, NULL);
+
+    // 4. 디바이스 파일 디스크립터들 닫기 (블로킹 I/O 강제 리턴 유도)
     serial_close();
     if (hw_enabled) hw_close();
 
-    // 4. 모든 보조 쓰레드가 깔끔하게 정돈되어 죽을 때까지 대기 및 자원 수거
-    pthread_join(timer, NULL);
+    // 5. 모든 보조 쓰레드가 깔끔하게 정돈되어 죽을 때까지 대기 및 자원 수거
 #ifdef SIMULATOR
     if (autotest_started) {
         pthread_join(autotest, NULL);
@@ -308,8 +413,8 @@ int main(int argc, char **argv) {
     if (hw_enabled) pthread_join(hw, NULL);
     if (serial_enabled) pthread_join(serial, NULL);
 
-    // 5. 최종 메모리 및 로그 백업 정리
-    save_game_log(g_game.logs);
+    // 6. 최종 자원 정리
+    sound_queue_destroy(&g_sound_queue);
     render_shutdown();
     debug_close();
 

@@ -118,6 +118,5 @@ void game_tick(GameState *game);
 void game_move_player(GameState *game, int player_index, int direction);
 void game_use_item(GameState *game, int player_index);
 void game_check_collisions(GameState *game);
-void save_game_log(GameLog logs[]);
 
 #endif
