@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#inclu
 
 // 레인 한계넘으면 그냥 레인에 있게 함.
 static int clamp_lane(int lane) {
